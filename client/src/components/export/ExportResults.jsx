@@ -26,6 +26,9 @@ export default function ExportResults({ data = [], count, dataType, loading, err
   }
 
   if (!loading && data.length === 0) {
+    if ((count || 0) > 0) {
+      return <Empty description={`No preview rows available for this mode, but ${count} records were processed.`} />
+    }
     return <Empty description="No data found. Try adjusting your filters." />
   }
 

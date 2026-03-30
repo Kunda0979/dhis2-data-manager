@@ -1,43 +1,61 @@
 import React, { useEffect, useState } from 'react'
-import { Table, Tag, Button, Empty, Typography, Space, Popconfirm, App } from 'antd'
-import { DeleteOutlined, ReloadOutlined } from '@ant-design/icons'
+import { Table, Tag, Button, Empty, Typography, Space, Popconfirm, App, Input, Select } from 'antd'
+import { DeleteOutlined, ReloadOutlined, RedoOutlined } from '@ant-design/icons'
 import StatusBadge from '../common/StatusBadge.jsx'
+import { useConnection } from '../../contexts/ConnectionContext.jsx'
+import api from '../../services/api.js'
 
 const { Text } = Typography
-const STORAGE_KEY = 'dhis2_job_history'
-
-function loadHistory() {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]')
-  } catch {
-    return []
-  }
-}
-
-export function addJobToHistory(job) {
-  const history = loadHistory()
-  history.unshift({ ...job, id: Date.now(), timestamp: new Date().toISOString() })
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(history.slice(0, 100)))
-}
 
 export default function JobHistory() {
   const { message } = App.useApp()
+  const { getHeaders } = useConnection()
   const [history, setHistory] = useState([])
+  const [filters, setFilters] = useState({ type: '', status: '', q: '' })
+  const [loading, setLoading] = useState(false)
+
+  const loadHistory = async () => {
+    setLoading(true)
+    try {
+      const res = await api.get('/api/history', {
+        headers: getHeaders(),
+        params: {
+          type: filters.type || undefined,
+          status: filters.status || undefined,
+          q: filters.q || undefined,
+        },
+      })
+      setHistory(res.data.entries || [])
+    } catch (err) {
+      message.error(err.response?.data?.error || err.message || 'Failed to load history')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   useEffect(() => {
-    setHistory(loadHistory())
-  }, [])
+    loadHistory()
+  }, [filters.type, filters.status, filters.q])
 
-  const handleClear = () => {
-    localStorage.removeItem(STORAGE_KEY)
-    setHistory([])
+  const handleClear = async () => {
+    await api.delete('/api/history', { headers: getHeaders() })
+    await loadHistory()
     message.success('History cleared')
   }
 
-  const handleDelete = (id) => {
-    const updated = history.filter((h) => h.id !== id)
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
-    setHistory(updated)
+  const handleDelete = async (id) => {
+    await api.delete(`/api/history/${id}`, { headers: getHeaders() })
+    await loadHistory()
+  }
+
+  const handleRerun = async (id) => {
+    try {
+      const res = await api.post(`/api/history/${id}/rerun`, {}, { headers: getHeaders() })
+      message.success(`Rerun job created: ${res.data.jobId}`)
+      await loadHistory()
+    } catch (err) {
+      message.error(err.response?.data?.error || 'Unable to rerun this item')
+    }
   }
 
   const columns = [
@@ -52,22 +70,28 @@ export default function JobHistory() {
       title: 'Type',
       dataIndex: 'type',
       key: 'type',
+      width: 100,
+      render: (v) => <Tag color={v === 'export' ? 'blue' : 'purple'}>{String(v || '').toUpperCase()}</Tag>,
+    },
+    {
+      title: 'Mode',
+      dataIndex: 'mode',
+      key: 'mode',
       width: 90,
-      render: (v) => <Tag color={v === 'export' ? 'blue' : 'purple'}>{v?.toUpperCase()}</Tag>,
+      render: (v) => <Tag>{String(v || 'sync').toUpperCase()}</Tag>,
     },
     {
       title: 'Data Type',
       dataIndex: 'dataType',
       key: 'dataType',
-      width: 120,
-      render: (v) => <Text style={{ fontSize: 12 }}>{v}</Text>,
+      width: 140,
     },
     {
       title: 'Format',
       dataIndex: 'format',
       key: 'format',
-      width: 80,
-      render: (v) => v ? <Tag>{v?.toUpperCase()}</Tag> : '—',
+      width: 90,
+      render: (v) => (v ? <Tag>{String(v).toUpperCase()}</Tag> : '—'),
     },
     {
       title: 'Records',
@@ -80,7 +104,7 @@ export default function JobHistory() {
       title: 'Status',
       dataIndex: 'status',
       key: 'status',
-      width: 110,
+      width: 120,
       render: (v) => <StatusBadge status={v} />,
     },
     {
@@ -93,33 +117,64 @@ export default function JobHistory() {
     {
       title: '',
       key: 'actions',
-      width: 50,
+      width: 120,
       render: (_, row) => (
-        <Button
-          size="small"
-          danger
-          icon={<DeleteOutlined />}
-          onClick={() => handleDelete(row.id)}
-        />
+        <Space>
+          <Button
+            size="small"
+            icon={<RedoOutlined />}
+            onClick={() => handleRerun(row.id)}
+            disabled={row.type !== 'export'}
+          />
+          <Button
+            size="small"
+            danger
+            icon={<DeleteOutlined />}
+            onClick={() => handleDelete(row.id)}
+          />
+        </Space>
       ),
     },
   ]
 
-  if (history.length === 0) {
-    return (
-      <Empty
-        description="No job history yet. Export or import data to see history here."
-        image={Empty.PRESENTED_IMAGE_SIMPLE}
-      />
-    )
-  }
-
   return (
     <div>
       <div className="flex justify-between items-center mb-3">
-        <Text strong>{history.length} job(s) in history</Text>
+        <Text strong>{history.length} item(s)</Text>
         <Space>
-          <Button icon={<ReloadOutlined />} size="small" onClick={() => setHistory(loadHistory())}>
+          <Select
+            size="small"
+            style={{ width: 120 }}
+            value={filters.type}
+            options={[
+              { value: '', label: 'All types' },
+              { value: 'export', label: 'Export' },
+              { value: 'import', label: 'Import' },
+            ]}
+            onChange={(value) => setFilters((f) => ({ ...f, type: value }))}
+          />
+          <Select
+            size="small"
+            style={{ width: 140 }}
+            value={filters.status}
+            options={[
+              { value: '', label: 'All status' },
+              { value: 'success', label: 'Success' },
+              { value: 'queued', label: 'Queued' },
+              { value: 'running', label: 'Running' },
+              { value: 'failed', label: 'Failed' },
+              { value: 'cancelled', label: 'Cancelled' },
+            ]}
+            onChange={(value) => setFilters((f) => ({ ...f, status: value }))}
+          />
+          <Input.Search
+            size="small"
+            allowClear
+            placeholder="Search"
+            style={{ width: 180 }}
+            onSearch={(q) => setFilters((f) => ({ ...f, q }))}
+          />
+          <Button icon={<ReloadOutlined />} size="small" onClick={loadHistory} loading={loading}>
             Refresh
           </Button>
           <Popconfirm title="Clear all history?" onConfirm={handleClear}>
@@ -127,13 +182,22 @@ export default function JobHistory() {
           </Popconfirm>
         </Space>
       </div>
-      <Table
-        dataSource={history}
-        columns={columns}
-        rowKey="id"
-        size="small"
-        pagination={{ pageSize: 20 }}
-      />
+
+      {history.length === 0 ? (
+        <Empty
+          description="No job history yet. Run import/export to populate history."
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+        />
+      ) : (
+        <Table
+          dataSource={history}
+          columns={columns}
+          rowKey="id"
+          size="small"
+          loading={loading}
+          pagination={{ pageSize: 20 }}
+        />
+      )}
     </div>
   )
 }

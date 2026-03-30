@@ -1,5 +1,5 @@
 import React from 'react'
-import { Alert, Card, Form, Select, Switch, Typography, Space, Tag, List } from 'antd'
+import { Alert, Card, Form, Select, Switch, Typography, Space, Tag, List, Table, Button } from 'antd'
 import { CheckCircleOutlined, WarningOutlined, CloseCircleOutlined } from '@ant-design/icons'
 
 const { Text } = Typography
@@ -17,6 +17,30 @@ const ATOMIC_MODES = [
 ]
 
 export default function ValidationPanel({ result, options, onOptionsChange }) {
+  const issueRows = [
+    ...(result?.rowIssues?.errors || []),
+    ...(result?.rowIssues?.warnings || []),
+  ]
+
+  const downloadIssueReport = () => {
+    if (issueRows.length === 0) return
+    const header = ['severity', 'row', 'column', 'field', 'message']
+    const lines = issueRows.map((issue) => [
+      issue.severity,
+      issue.row,
+      issue.column || '',
+      issue.field || '',
+      String(issue.message || '').replace(/"/g, '""'),
+    ].map((cell) => `"${cell}"`).join(','))
+    const csv = [header.join(','), ...lines].join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.download = 'import-validation-issues.csv'
+    link.click()
+    URL.revokeObjectURL(link.href)
+  }
+
   return (
     <div>
       {result && (
@@ -66,6 +90,30 @@ export default function ValidationPanel({ result, options, onOptionsChange }) {
               showIcon
               style={{ marginTop: 8 }}
             />
+          )}
+
+          {issueRows.length > 0 && (
+            <Card
+              size="small"
+              title={`Row-level issues (${issueRows.length})`}
+              extra={<Button size="small" onClick={downloadIssueReport}>Download CSV</Button>}
+              style={{ marginTop: 12 }}
+            >
+              <Table
+                size="small"
+                rowKey={(row, i) => `${row.severity}-${row.row}-${row.field}-${i}`}
+                dataSource={issueRows.slice(0, 100)}
+                pagination={false}
+                columns={[
+                  { title: 'Severity', dataIndex: 'severity', key: 'severity', width: 90 },
+                  { title: 'Row', dataIndex: 'row', key: 'row', width: 80 },
+                  { title: 'Column', dataIndex: 'column', key: 'column', width: 140 },
+                  { title: 'Field', dataIndex: 'field', key: 'field', width: 140 },
+                  { title: 'Message', dataIndex: 'message', key: 'message' },
+                ]}
+                scroll={{ y: 280 }}
+              />
+            </Card>
           )}
         </div>
       )}

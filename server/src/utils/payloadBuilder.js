@@ -43,15 +43,21 @@ function convertToTracker(rawPayload) {
 }
 
 function applyMapping(row, mapping) {
-  const result = {};
+  const result = Object.create(null);
   for (const [dhis2Field, colName] of Object.entries(mapping)) {
+    if (!isSafeObjectKey(dhis2Field)) continue;
     result[dhis2Field] = row[colName] !== undefined ? row[colName] : row[dhis2Field];
   }
   // Also copy any unmapped fields
   for (const [key, val] of Object.entries(row)) {
+    if (!isSafeObjectKey(key)) continue;
     if (!(key in result)) result[key] = val;
   }
   return result;
+}
+
+function isSafeObjectKey(key) {
+  return !['__proto__', 'constructor', 'prototype'].includes(key);
 }
 
 const DHIS2_UID_LENGTH = 11;

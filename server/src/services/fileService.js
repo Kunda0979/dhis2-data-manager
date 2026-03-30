@@ -2,13 +2,33 @@ const ExcelJS = require('exceljs');
 const { stringify } = require('csv-stringify/sync');
 const { parse } = require('csv-parse/sync');
 
+const FORMULA_PREFIXES = ['=', '+', '-', '@'];
+
+function sanitizeSpreadsheetValue(value) {
+  if (value === null || value === undefined) return '';
+  const text = String(value);
+  if (text.length > 0 && FORMULA_PREFIXES.includes(text[0])) {
+    return `'${text}`;
+  }
+  return text;
+}
+
+function sanitizeSpreadsheetRow(row) {
+  const safe = {};
+  for (const [key, value] of Object.entries(row)) {
+    safe[key] = sanitizeSpreadsheetValue(value);
+  }
+  return safe;
+}
+
 /**
  * Convert JSON data to CSV string.
  */
 function jsonToCsv(data) {
   if (!Array.isArray(data) || data.length === 0) return '';
   const columns = Object.keys(data[0]);
-  return stringify(data, { header: true, columns });
+  const safeData = data.map((row) => sanitizeSpreadsheetRow(row));
+  return stringify(safeData, { header: true, columns });
 }
 
 /**
@@ -22,7 +42,7 @@ async function jsonToExcel(data) {
     const headers = Object.keys(data[0]);
     ws.columns = headers.map((key) => ({ header: key, key, width: 20 }));
     for (const row of data) {
-      ws.addRow(row);
+      ws.addRow(sanitizeSpreadsheetRow(row));
     }
   }
 

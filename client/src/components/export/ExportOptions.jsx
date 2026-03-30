@@ -24,9 +24,11 @@ export default function ExportOptions({
   dataType,
   format,
   status,
+  asyncMode,
   onDataTypeChange,
   onFormatChange,
   onStatusChange,
+  onAsyncModeChange,
 }) {
   return (
     <Card size="small" title="Export Options" style={{ marginBottom: 12 }}>
@@ -57,6 +59,19 @@ export default function ExportOptions({
             value={status || ''}
             onChange={(v) => onStatusChange(v || undefined)}
             style={{ width: 180 }}
+          />
+        </Form.Item>
+
+        <Form.Item label="Execution Mode" style={{ marginTop: 12, marginBottom: 0 }}>
+          <Radio.Group
+            value={asyncMode ? 'async' : 'sync'}
+            onChange={(e) => onAsyncModeChange(e.target.value === 'async')}
+            optionType="button"
+            buttonStyle="solid"
+            options={[
+              { label: 'Sync', value: 'sync' },
+              { label: 'Async', value: 'async' },
+            ]}
           />
         </Form.Item>
       </Form>

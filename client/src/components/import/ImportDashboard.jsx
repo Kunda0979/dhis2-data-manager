@@ -8,6 +8,7 @@ import ValidationPanel from './ValidationPanel.jsx'
 import ImportResults from './ImportResults.jsx'
 import { useDhis2Import } from '../../hooks/useDhis2Import.js'
 import { csvToJson, readJsonFile } from '../../utils/fileConverters.js'
+import { useDhis2Metadata } from '../../hooks/useDhis2Metadata.js'
 
 const STEPS = [
   { title: 'Upload' },
@@ -32,6 +33,8 @@ export default function ImportDashboard() {
   const [mapping, setMapping] = useState({})
   const [options, setOptions] = useState(DEFAULT_OPTIONS)
   const { validateFile, importFile, loading, error, result, validationResult } = useDhis2Import()
+  const { fetchDataElements, fetchTrackedEntityTypes } = useDhis2Metadata()
+  const [metadataCandidates, setMetadataCandidates] = useState([])
 
   const handleFileSelect = async (uploadedFile) => {
     setFile(uploadedFile)
@@ -66,6 +69,26 @@ export default function ImportDashboard() {
     if (res) setStep(4)
   }
 
+  const loadMetadataCandidates = async () => {
+    const [dataElements, trackedEntityTypes] = await Promise.all([
+      fetchDataElements(),
+      fetchTrackedEntityTypes(),
+    ])
+
+    const candidates = [
+      ...(dataElements || []).map((de) => ({ value: `de_${de.id}`, label: `${de.displayName} (de_${de.id})` })),
+      ...((trackedEntityTypes || [])
+        .flatMap((tet) => (tet.trackedEntityTypeAttributes || []))
+        .map((entry) => {
+          const attr = entry.trackedEntityAttribute
+          return attr ? { value: `attr_${attr.id}`, label: `${attr.displayName} (attr_${attr.id})` } : null
+        })
+        .filter(Boolean)),
+    ]
+
+    setMetadataCandidates(candidates)
+  }
+
   return (
     <div>
       <Card>
@@ -89,6 +112,7 @@ export default function ImportDashboard() {
             dataType={dataType}
             mapping={mapping}
             onChange={setMapping}
+            metadataCandidates={metadataCandidates}
           />
         )}
 
@@ -111,7 +135,14 @@ export default function ImportDashboard() {
             <Button onClick={() => setStep((s) => s - 1)}>← Back</Button>
           )}
           {step === 1 && (
-            <Button onClick={() => setStep(2)}>Map Fields →</Button>
+            <Button
+              onClick={async () => {
+                await loadMetadataCandidates()
+                setStep(2)
+              }}
+            >
+              Map Fields →
+            </Button>
           )}
           {step === 2 && (
             <Button type="primary" onClick={handleValidate} loading={loading}>

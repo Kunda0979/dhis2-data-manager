@@ -7,6 +7,7 @@ export function useDhis2Metadata() {
   const [programs, setPrograms] = useState([])
   const [orgUnits, setOrgUnits] = useState([])
   const [trackedEntityTypes, setTrackedEntityTypes] = useState([])
+  const [dataElements, setDataElements] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
@@ -55,14 +56,35 @@ export function useDhis2Metadata() {
     }
   }, [getHeaders])
 
+  const fetchDataElements = useCallback(async (programStage) => {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await api.get('/api/metadata/dataElements', {
+        headers: getHeaders(),
+        params: programStage ? { programStage } : undefined,
+      })
+      const items = res.data.dataElements || []
+      setDataElements(items)
+      return items
+    } catch (err) {
+      setError(err.response?.data?.message || err.message)
+      return []
+    } finally {
+      setLoading(false)
+    }
+  }, [getHeaders])
+
   return {
     programs,
     orgUnits,
     trackedEntityTypes,
+    dataElements,
     loading,
     error,
     fetchPrograms,
     fetchOrgUnits,
     fetchTrackedEntityTypes,
+    fetchDataElements,
   }
 }

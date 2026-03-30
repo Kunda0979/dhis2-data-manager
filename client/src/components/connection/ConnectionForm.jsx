@@ -12,8 +12,8 @@ export default function ConnectionForm() {
   const [form] = Form.useForm()
 
   const handleSubmit = async (values) => {
-    const { url, username, password } = values
-    const result = await connect(url.trim(), username.trim(), password)
+    const { url, username, password, profileName } = values
+    const result = await connect(url.trim(), username.trim(), password, profileName?.trim())
     if (result.success) {
       navigate('/export')
     }
@@ -82,6 +82,16 @@ export default function ConnectionForm() {
           </Form.Item>
 
           <Form.Item
+            name="profileName"
+            label="Profile Name (optional)"
+          >
+            <Input
+              placeholder="Production / Staging / Country A"
+              size="large"
+            />
+          </Form.Item>
+
+          <Form.Item
             name="password"
             label="Password"
             rules={[{ required: true, message: 'Please enter your password' }]}
@@ -110,7 +120,7 @@ export default function ConnectionForm() {
 
         <Divider />
         <Paragraph type="secondary" style={{ fontSize: 12, textAlign: 'center', marginBottom: 0 }}>
-          Your credentials are only stored in memory and never saved to disk.
+          Credentials are stored server-side in an expiring in-memory session.
           <br />
           Supports DHIS2 v42+ with the new Tracker API.
         </Paragraph>

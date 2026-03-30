@@ -1,13 +1,14 @@
 const axios = require('axios');
+const { normalizeDhis2BaseUrl } = require('../utils/security');
 
 /**
  * Creates an Axios instance configured for a specific DHIS2 instance.
  * Credentials are taken from request headers: x-dhis2-url, x-dhis2-username, x-dhis2-password
  */
 function createDhis2Client(req) {
-  const baseURL = req.headers['x-dhis2-url'];
-  const username = req.headers['x-dhis2-username'];
-  const password = req.headers['x-dhis2-password'];
+  const baseURL = req.dhis2Credentials?.url || req.headers['x-dhis2-url'];
+  const username = req.dhis2Credentials?.username || req.headers['x-dhis2-username'];
+  const password = req.dhis2Credentials?.password || req.headers['x-dhis2-password'];
 
   if (!baseURL || !username || !password) {
     const err = new Error('Missing DHIS2 connection headers (x-dhis2-url, x-dhis2-username, x-dhis2-password)');
@@ -15,15 +16,17 @@ function createDhis2Client(req) {
     throw err;
   }
 
+  const normalizedBaseUrl = normalizeDhis2BaseUrl(baseURL);
   const token = Buffer.from(`${username}:${password}`).toString('base64');
 
   return axios.create({
-    baseURL: baseURL.endsWith('/') ? baseURL.slice(0, -1) : baseURL,
+    baseURL: normalizedBaseUrl,
     headers: {
       Authorization: `Basic ${token}`,
       'Content-Type': 'application/json',
     },
     timeout: 60000,
+    maxRedirects: 0,
   });
 }
 

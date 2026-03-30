@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Card, Steps, Button, Space, Divider, App } from 'antd'
+import { Card, Steps, Button, Space, Divider, App, Progress, Alert } from 'antd'
 import { DownloadOutlined } from '@ant-design/icons'
 import ProgramSelector from './ProgramSelector.jsx'
 import OrgUnitSelector from './OrgUnitSelector.jsx'
@@ -22,8 +22,22 @@ export default function ExportDashboard() {
   })
   const [dataType, setDataType] = useState('events')
   const [format, setFormat] = useState('json')
+  const [asyncMode, setAsyncMode] = useState(false)
+  const [activeJobId, setActiveJobId] = useState(null)
 
-  const { exportData, downloadFile, data, loading, error, count } = useDhis2Export()
+  const {
+    exportData,
+    downloadFile,
+    data,
+    loading,
+    error,
+    count,
+    jobStatus,
+    startExportJob,
+    getExportJob,
+    cancelExportJob,
+    downloadExportJob,
+  } = useDhis2Export()
   const { programs, orgUnits, fetchPrograms, fetchOrgUnits } = useDhis2Metadata()
 
   useEffect(() => {
@@ -44,7 +58,14 @@ export default function ExportDashboard() {
     if (filters.endDate) params.endDate = filters.endDate
     if (filters.status) params.status = filters.status
 
-    await exportData(dataType, params)
+    if (asyncMode) {
+      const job = await startExportJob(dataType, params, format)
+      if (job?.jobId) {
+        setActiveJobId(job.jobId)
+      }
+    } else {
+      await exportData(dataType, params)
+    }
     setCurrentStep(1)
   }
 
@@ -58,12 +79,39 @@ export default function ExportDashboard() {
     if (filters.endDate) params.endDate = filters.endDate
 
     try {
-      await downloadFile(dataType, params, format)
-      message.success(`Downloaded ${count} records as ${format.toUpperCase()}`)
+      if (asyncMode && activeJobId) {
+        await downloadExportJob(activeJobId)
+        message.success('Downloaded async export result')
+      } else {
+        await downloadFile(dataType, params, format)
+        message.success(`Downloaded ${count} records as ${format.toUpperCase()}`)
+      }
     } catch {
       message.error('Download failed')
     }
   }
+
+  useEffect(() => {
+    if (!activeJobId) return undefined
+
+    const timer = setInterval(async () => {
+      const status = await getExportJob(activeJobId)
+      if (status?.status === 'completed') {
+        setCurrentStep(1)
+        if (format === 'json') {
+          await exportData(dataType, {
+            ...filters,
+          })
+        }
+        clearInterval(timer)
+      }
+      if (status?.status === 'failed' || status?.status === 'cancelled') {
+        clearInterval(timer)
+      }
+    }, 2000)
+
+    return () => clearInterval(timer)
+  }, [activeJobId, dataType, exportData, filters, format, getExportJob])
 
   const steps = [
     { title: 'Configure', description: 'Set filters' },
@@ -101,16 +149,43 @@ export default function ExportDashboard() {
                 dataType={dataType}
                 format={format}
                 status={filters.status}
+                asyncMode={asyncMode}
                 onDataTypeChange={setDataType}
                 onFormatChange={setFormat}
                 onStatusChange={(v) => setFilters((f) => ({ ...f, status: v }))}
+                onAsyncModeChange={setAsyncMode}
               />
             </div>
           </div>
         )}
 
         {currentStep === 1 && (
-          <ExportResults data={data} count={count} dataType={dataType} loading={loading} error={error} />
+          <>
+            {asyncMode && jobStatus && (
+              <Card size="small" style={{ marginBottom: 12 }}>
+                <Space direction="vertical" style={{ width: '100%' }}>
+                  <Alert
+                    type={jobStatus.status === 'failed' ? 'error' : jobStatus.status === 'completed' ? 'success' : 'info'}
+                    message={`Async job ${jobStatus.status}`}
+                    description={jobStatus.error || `Progress: ${jobStatus.progress || 0}%`}
+                    showIcon
+                  />
+                  <Progress percent={jobStatus.progress || 0} />
+                  <Space>
+                    {jobStatus.status === 'running' || jobStatus.status === 'queued' ? (
+                      <Button onClick={() => cancelExportJob(activeJobId)}>
+                        Cancel Job
+                      </Button>
+                    ) : null}
+                    {(jobStatus.status === 'failed' || jobStatus.status === 'cancelled') && (
+                      <Button type="primary" onClick={handleExport}>Retry</Button>
+                    )}
+                  </Space>
+                </Space>
+              </Card>
+            )}
+            <ExportResults data={data} count={count} dataType={dataType} loading={loading} error={error} />
+          </>
         )}
 
         <Divider />
@@ -122,7 +197,12 @@ export default function ExportDashboard() {
           ) : (
             <>
               <Button onClick={() => setCurrentStep(0)}>← Back to Filters</Button>
-              <Button type="primary" onClick={handleDownload} icon={<DownloadOutlined />} disabled={data.length === 0}>
+              <Button
+                type="primary"
+                onClick={handleDownload}
+                icon={<DownloadOutlined />}
+                disabled={asyncMode ? !(jobStatus?.status === 'completed') : data.length === 0}
+              >
                 Download {format.toUpperCase()}
               </Button>
             </>

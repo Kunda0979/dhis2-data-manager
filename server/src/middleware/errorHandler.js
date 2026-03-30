@@ -2,6 +2,7 @@
  * Global error handling middleware.
  */
 function errorHandler(err, req, res, next) {
+  const isProd = process.env.NODE_ENV === 'production';
   console.error('[Error]', err.message);
 
   // Axios errors from DHIS2
@@ -12,7 +13,7 @@ function errorHandler(err, req, res, next) {
       error: 'DHIS2 API Error',
       status,
       message: typeof data === 'string' ? data : data?.message || JSON.stringify(data),
-      details: data,
+      details: isProd ? undefined : data,
     });
   }
 
@@ -26,7 +27,7 @@ function errorHandler(err, req, res, next) {
   // Generic server error
   res.status(500).json({
     error: 'Internal Server Error',
-    message: err.message,
+    message: isProd ? 'Unexpected server error' : err.message,
   });
 }
 

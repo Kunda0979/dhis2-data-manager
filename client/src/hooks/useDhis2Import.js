@@ -56,7 +56,12 @@ export function useDhis2Import() {
       const msg = errData?.message || errData?.error || err.message
       setError(msg)
       if (errData?.errors) {
-        setValidationResult({ valid: false, errors: errData.errors, warnings: errData.warnings || [] })
+        setValidationResult({
+          valid: false,
+          errors: errData.errors,
+          warnings: errData.warnings || [],
+          rowIssues: errData.rowIssues,
+        })
       }
       return null
     } finally {

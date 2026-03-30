@@ -10,6 +10,8 @@ const STATUS_COLORS = {
   ERROR: 'error',
   'in-progress': 'processing',
   running: 'processing',
+  queued: 'processing',
+  cancelled: 'default',
   pending: 'warning',
   warning: 'warning',
   ACTIVE: 'blue',

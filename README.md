@@ -93,6 +93,21 @@ docker-compose up --build
 PORT=4000
 NODE_ENV=production
 MAX_UPLOAD_SIZE_MB=50
+ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173
+DHIS2_ALLOWED_HOSTS=
+BLOCK_PRIVATE_DHIS2_URLS=false
+RATE_LIMIT_CONNECT_WINDOW_MIN=15
+RATE_LIMIT_CONNECT_MAX=30
+RATE_LIMIT_IMPORT_WINDOW_MIN=15
+RATE_LIMIT_IMPORT_MAX=60
+SESSION_TTL_HOURS=8
+MAX_HISTORY_ITEMS=300
+```
+
+### Run backend tests
+```bash
+cd server
+npm test
 ```
 
 ### Client `.env`
@@ -111,6 +126,26 @@ GET  /api/tracker/enrollments?program=UID&orgUnit=UID  # Export enrollments
 GET  /api/tracker/trackedEntities?program=UID          # Export tracked entities
 POST /api/tracker                                      # Import data
 GET  /api/tracker/jobs/{jobId}                         # Async job status
+```
+
+## 🔐 Backend Session & Job APIs
+
+```
+POST   /api/connect                    # connect and create/update session profile
+GET    /api/connect/profiles           # list session profiles + active profile
+POST   /api/connect/profiles/switch    # switch active profile
+DELETE /api/connect/profiles/{id}      # remove one profile
+POST   /api/connect/disconnect         # terminate session
+
+POST   /api/export/jobs                # create async export job
+GET    /api/export/jobs/{jobId}        # poll async export status/progress
+POST   /api/export/jobs/{jobId}/cancel # cancel async export
+GET    /api/export/jobs/{jobId}/download
+
+GET    /api/history                    # list operation history (server-side)
+POST   /api/history/{id}/rerun         # rerun prior export from history
+DELETE /api/history/{id}
+DELETE /api/history
 ```
 
 ---

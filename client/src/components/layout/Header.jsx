@@ -1,5 +1,5 @@
 import React from 'react'
-import { Layout, Space, Typography, Badge, Button, Tooltip } from 'antd'
+import { Layout, Space, Typography, Badge, Button, Tooltip, Select } from 'antd'
 import { DisconnectOutlined, CheckCircleFilled } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { useConnection } from '../../contexts/ConnectionContext.jsx'
@@ -8,7 +8,7 @@ const { Header: AntHeader } = Layout
 const { Text } = Typography
 
 export default function Header() {
-  const { connection, disconnect } = useConnection()
+  const { connection, profiles, switchProfile, disconnect } = useConnection()
   const navigate = useNavigate()
 
   const handleDisconnect = () => {
@@ -46,6 +46,18 @@ export default function Header() {
       </Space>
 
       <Space>
+        {profiles?.length > 1 && (
+          <Select
+            size="small"
+            style={{ width: 220 }}
+            value={connection?.id}
+            options={(profiles || []).map((profile) => ({
+              value: profile.id,
+              label: `${profile.profileName || profile.username} · ${profile.serverInfo?.systemName || profile.url}`,
+            }))}
+            onChange={(profileId) => switchProfile(profileId)}
+          />
+        )}
         <Text type="secondary" style={{ fontSize: 12 }}>
           <CheckCircleFilled style={{ color: '#52c41a', marginRight: 4 }} />
           {connection?.user?.displayName || connection?.user?.username}
