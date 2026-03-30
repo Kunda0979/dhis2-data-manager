@@ -12,6 +12,8 @@ const historyRouter = require('./routes/history');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
+const isProduction = process.env.NODE_ENV === 'production';
+const allowAllOrigins = process.env.CORS_ALLOW_ALL === 'true' || !isProduction;
 
 const defaultOrigins = [
   'http://localhost:3000',
@@ -26,6 +28,7 @@ const configuredOrigins = process.env.ALLOWED_ORIGINS
 
 const corsOptions = {
   origin(origin, callback) {
+    if (allowAllOrigins) return callback(null, true);
     // Non-browser clients (curl/postman) often omit Origin.
     if (!origin) return callback(null, true);
     if (configuredOrigins.includes(origin)) return callback(null, true);
