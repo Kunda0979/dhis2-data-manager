@@ -5,7 +5,7 @@ const upload = require('../middleware/upload');
 const { validateImportRequest } = require('../middleware/validate');
 const { importLimiter } = require('../middleware/rateLimiter');
 const { importTrackerData, getJobStatus } = require('../services/importService');
-const { csvToJson, excelToJson } = require('../services/fileService');
+const { csvToJson, excelToJson, jsonToCsv, jsonToExcel } = require('../services/fileService');
 const { buildTrackerPayload, convertToTracker } = require('../utils/payloadBuilder');
 const { validateTrackerPayload } = require('../utils/payloadValidator');
 const { addHistoryEntry } = require('../services/historyService');
@@ -14,6 +14,73 @@ const { buildIssueReport } = require('../utils/rowValidation');
 const router = express.Router();
 
 router.use(requireDhis2Credentials);
+
+const ALLOWED_TEMPLATE_TYPES = new Set(['events', 'enrollments', 'trackedEntities']);
+const ALLOWED_TEMPLATE_FORMATS = new Set(['json', 'csv', 'xlsx']);
+const ALLOWED_TEMPLATE_VARIANTS = new Set(['empty', 'prepopulated']);
+
+function buildTemplateRows(dataType, variant) {
+  const empty = variant === 'empty';
+
+  if (dataType === 'events') {
+    return [{
+      event: empty ? '' : 'vrr6fQh6vQf',
+      status: empty ? '' : 'ACTIVE',
+      program: empty ? '' : 'IpHINAT79UW',
+      programStage: empty ? '' : 'A03MvHHogjR',
+      orgUnit: empty ? '' : 'DiszpKrYNg8',
+      occurredAt: empty ? '' : '2026-03-31',
+      trackedEntity: empty ? '' : 'PMa2VCrupOd',
+      enrollment: empty ? '' : 'AaB3zKZ2CXY',
+      de_a3kGcGDCuk6: empty ? '' : '37.5',
+      de_B4Q2mFh3xWk: empty ? '' : 'No symptoms',
+    }];
+  }
+
+  if (dataType === 'enrollments') {
+    return [{
+      enrollment: empty ? '' : 'AaB3zKZ2CXY',
+      trackedEntity: empty ? '' : 'PMa2VCrupOd',
+      program: empty ? '' : 'IpHINAT79UW',
+      orgUnit: empty ? '' : 'DiszpKrYNg8',
+      enrolledAt: empty ? '' : '2026-03-30',
+      occurredAt: empty ? '' : '2026-03-30',
+      status: empty ? '' : 'ACTIVE',
+    }];
+  }
+
+  return [{
+    trackedEntity: empty ? '' : 'PMa2VCrupOd',
+    trackedEntityType: empty ? '' : 'nEenWmSyUEp',
+    orgUnit: empty ? '' : 'DiszpKrYNg8',
+    attr_w75KJ2mc4zz: empty ? '' : 'John',
+    attr_zDhUuAYrxNC: empty ? '' : 'Doe',
+    attr_AxqcoiKURhU: empty ? '' : '1988-04-12',
+  }];
+}
+
+async function sendTemplateFile(res, rows, dataType, variant, format) {
+  const timestamp = new Date().toISOString().slice(0, 10);
+  const fileBase = `template-${dataType}-${variant}-${timestamp}`;
+
+  if (format === 'csv') {
+    const csv = jsonToCsv(rows);
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileBase}.csv"`);
+    return res.send(csv);
+  }
+
+  if (format === 'xlsx') {
+    const buffer = await jsonToExcel(rows);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileBase}.xlsx"`);
+    return res.send(buffer);
+  }
+
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', `attachment; filename="${fileBase}.json"`);
+  return res.send(JSON.stringify(rows, null, 2));
+}
 
 function parseMapping(mappingRaw) {
   if (!mappingRaw) return {};
@@ -29,6 +96,35 @@ function parseMapping(mappingRaw) {
     throw err;
   }
 }
+
+/**
+ * GET /api/import/template
+ * Download import templates (empty or pre-populated).
+ */
+router.get('/template', async (req, res, next) => {
+  try {
+    const dataType = String(req.query.dataType || 'events');
+    const format = String(req.query.format || 'csv').toLowerCase();
+    const variant = String(req.query.variant || 'empty').toLowerCase();
+
+    if (!ALLOWED_TEMPLATE_TYPES.has(dataType)) {
+      return res.status(400).json({ error: 'Invalid dataType for template download' });
+    }
+
+    if (!ALLOWED_TEMPLATE_FORMATS.has(format)) {
+      return res.status(400).json({ error: 'Invalid format for template download' });
+    }
+
+    if (!ALLOWED_TEMPLATE_VARIANTS.has(variant)) {
+      return res.status(400).json({ error: 'Invalid variant for template download' });
+    }
+
+    const rows = buildTemplateRows(dataType, variant);
+    await sendTemplateFile(res, rows, dataType, variant, format);
+  } catch (err) {
+    next(err);
+  }
+});
 
 /**
  * POST /api/import/tracker

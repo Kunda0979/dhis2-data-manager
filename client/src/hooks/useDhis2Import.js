@@ -74,6 +74,25 @@ export function useDhis2Import() {
     return res.data
   }, [getHeaders])
 
+  const downloadTemplate = useCallback(async (dataType, variant, format) => {
+    const params = new URLSearchParams({ dataType, variant, format }).toString()
+    const res = await api.get(`/api/import/template?${params}`, {
+      headers: getHeaders(),
+      responseType: 'blob',
+    })
+
+    const contentDisposition = res.headers['content-disposition'] || ''
+    const filenameMatch = contentDisposition.match(/filename="(.+)"/)
+    const filename = filenameMatch ? filenameMatch[1] : `template-${dataType}-${variant}.${format}`
+
+    const blob = new Blob([res.data])
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.download = filename
+    link.click()
+    URL.revokeObjectURL(link.href)
+  }, [getHeaders])
+
   return {
     loading,
     error,
@@ -82,5 +101,6 @@ export function useDhis2Import() {
     validateFile,
     importFile,
     checkJobStatus,
+    downloadTemplate,
   }
 }
