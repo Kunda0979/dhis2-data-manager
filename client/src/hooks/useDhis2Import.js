@@ -81,10 +81,18 @@ export function useDhis2Import() {
       format = 'csv',
       programId,
       programStageId,
+      orgUnitScope,
+      orgUnitIds,
+      language,
+      layout,
     } = options
     const query = { dataType, variant, format }
     if (programId) query.programId = programId
     if (programStageId) query.programStageId = programStageId
+    if (orgUnitScope) query.orgUnitScope = orgUnitScope
+    if (Array.isArray(orgUnitIds) && orgUnitIds.length > 0) query.orgUnitIds = orgUnitIds.join(',')
+    if (language) query.language = language
+    if (layout) query.layout = layout
     const params = new URLSearchParams(query).toString()
     const res = await api.get(`/api/import/template?${params}`, {
       headers: getHeaders(),

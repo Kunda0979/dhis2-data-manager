@@ -5,7 +5,7 @@ const upload = require('../middleware/upload');
 const { validateImportRequest } = require('../middleware/validate');
 const { importLimiter } = require('../middleware/rateLimiter');
 const { importTrackerData, getJobStatus } = require('../services/importService');
-const { csvToJson, excelToJson, jsonToCsv, jsonToExcel } = require('../services/fileService');
+const { csvToJson, excelToJson, jsonToCsv, buildTemplateWorkbook } = require('../services/fileService');
 const { buildTrackerPayload, convertToTracker } = require('../utils/payloadBuilder');
 const { validateTrackerPayload } = require('../utils/payloadValidator');
 const { addHistoryEntry } = require('../services/historyService');
@@ -19,6 +19,7 @@ router.use(requireDhis2Credentials);
 const ALLOWED_TEMPLATE_TYPES = new Set(['events', 'enrollments', 'trackedEntities']);
 const ALLOWED_TEMPLATE_FORMATS = new Set(['json', 'csv', 'xlsx']);
 const ALLOWED_TEMPLATE_VARIANTS = new Set(['empty', 'prepopulated']);
+const ALLOWED_TEMPLATE_LAYOUTS = new Set(['horizontal', 'vertical']);
 
 function uniqueById(items) {
   const seen = new Set();
@@ -40,6 +41,140 @@ function sanitizeHeaderName(name) {
 function buildTemplateFieldKey(prefix, id, displayName) {
   const safeName = sanitizeHeaderName(displayName);
   return safeName ? `${prefix}_${id}__${safeName}` : `${prefix}_${id}`;
+}
+
+function makeQuestion(key, label, valueType = 'TEXT', required = false) {
+  return { key, label, valueType, required: Boolean(required) };
+}
+
+function buildProgramTemplateLayout(programMeta, dataType, programStageId) {
+  const sections = [];
+
+  if (dataType === 'trackedEntities') {
+    const attrs = uniqueById([
+      ...((programMeta.programTrackedEntityAttributes || []).map((item) => item.trackedEntityAttribute).filter(Boolean)),
+      ...((programMeta.trackedEntityType?.trackedEntityTypeAttributes || []).map((item) => item.trackedEntityAttribute).filter(Boolean)),
+    ]);
+
+    sections.push({
+      id: 'te-core',
+      name: 'Tracked Entity Details',
+      questions: [
+        makeQuestion('trackedEntity', 'Tracked Entity ID', 'TEXT', false),
+        makeQuestion('trackedEntityType', 'Tracked Entity Type', 'TEXT', true),
+        makeQuestion('orgUnit', 'Organisation Unit', 'TEXT', true),
+      ],
+    });
+
+    sections.push({
+      id: 'te-attributes',
+      name: 'Attributes',
+      questions: attrs.map((attr) =>
+        makeQuestion(buildTemplateFieldKey('attr', attr.id, attr.displayName), attr.displayName || attr.id, attr.valueType || 'TEXT', false)
+      ),
+    });
+
+    return sections;
+  }
+
+  if (dataType === 'enrollments') {
+    return [{
+      id: 'enrollment-core',
+      name: 'Enrollment Details',
+      questions: [
+        makeQuestion('enrollment', 'Enrollment ID', 'TEXT', false),
+        makeQuestion('trackedEntity', 'Tracked Entity ID', 'TEXT', false),
+        makeQuestion('program', 'Program', 'TEXT', true),
+        makeQuestion('orgUnit', 'Organisation Unit', 'TEXT', true),
+        makeQuestion('enrolledAt', 'Enrollment Date', 'DATE', true),
+        makeQuestion('occurredAt', 'Incident Date', 'DATE', false),
+        makeQuestion('status', 'Status', 'TEXT', false),
+      ],
+    }];
+  }
+
+  const sortedStages = [...(programMeta.programStages || [])].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+  const selectedStage = sortedStages.find((stage) => stage.id === programStageId) || sortedStages[0] || null;
+
+  if (!selectedStage) {
+    return [{
+      id: 'event-core',
+      name: 'Event Details',
+      questions: [
+        makeQuestion('event', 'Event ID', 'TEXT', false),
+        makeQuestion('status', 'Status', 'TEXT', false),
+        makeQuestion('program', 'Program', 'TEXT', true),
+        makeQuestion('programStage', 'Program Stage', 'TEXT', true),
+        makeQuestion('orgUnit', 'Organisation Unit', 'TEXT', true),
+        makeQuestion('occurredAt', 'Event Date', 'DATE', true),
+      ],
+    }];
+  }
+
+  const coreQuestions = [
+    makeQuestion('event', 'Event ID', 'TEXT', false),
+    makeQuestion('status', 'Status', 'TEXT', false),
+    makeQuestion('program', 'Program', 'TEXT', true),
+    makeQuestion('programStage', 'Program Stage', 'TEXT', true),
+    makeQuestion('orgUnit', 'Organisation Unit', 'TEXT', true),
+    makeQuestion('occurredAt', 'Event Date', 'DATE', true),
+  ];
+
+  if (programMeta.programType === 'WITH_REGISTRATION') {
+    coreQuestions.push(makeQuestion('trackedEntity', 'Tracked Entity ID', 'TEXT', false));
+    coreQuestions.push(makeQuestion('enrollment', 'Enrollment ID', 'TEXT', false));
+  }
+
+  sections.push({ id: 'event-core', name: 'Event Details', questions: coreQuestions });
+
+  const sectionElements = (selectedStage.programStageSections || []).map((section) => {
+    const questions = (section.dataElements || []).map((de) =>
+      makeQuestion(buildTemplateFieldKey('de', de.id, de.formName || de.displayName), de.formName || de.displayName || de.id, de.valueType || 'TEXT', false)
+    );
+    return {
+      id: section.id,
+      name: section.displayName || 'Section',
+      questions,
+    };
+  });
+
+  const stageElements = (selectedStage.programStageDataElements || [])
+    .map((item) => ({
+      dataElement: item.dataElement,
+      compulsory: item.compulsory,
+      sortOrder: item.sortOrder,
+    }))
+    .filter((item) => item.dataElement);
+
+  if (sectionElements.length > 0) {
+    sections.push(...sectionElements);
+    return sections;
+  }
+
+  sections.push({
+    id: selectedStage.id,
+    name: selectedStage.displayName || 'Program Stage Questions',
+    questions: [...stageElements]
+      .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))
+      .map((item) =>
+        makeQuestion(
+          buildTemplateFieldKey('de', item.dataElement.id, item.dataElement.formName || item.dataElement.displayName),
+          item.dataElement.formName || item.dataElement.displayName || item.dataElement.id,
+          item.dataElement.valueType || 'TEXT',
+          item.compulsory,
+        )
+      ),
+  });
+
+  return sections;
+}
+
+function buildGenericTemplateLayout(sampleRow) {
+  return [{
+    id: 'generic',
+    name: 'Template Fields',
+    questions: Object.keys(sampleRow || {}).map((key) => makeQuestion(key, key, 'TEXT', false)),
+  }];
 }
 
 function buildGenericTemplateRows(dataType, variant) {
@@ -184,7 +319,7 @@ async function fetchProgramTemplateMetadata(req, programId) {
         'programType',
         'trackedEntityType[id,displayName,trackedEntityTypeAttributes[trackedEntityAttribute[id,displayName,valueType]]]',
         'programTrackedEntityAttributes[trackedEntityAttribute[id,displayName,valueType],mandatory]',
-        'programStages[id,displayName,sortOrder,programStageDataElements[dataElement[id,displayName,valueType],sortOrder]]',
+        'programStages[id,displayName,sortOrder,programStageDataElements[dataElement[id,displayName,formName,valueType],sortOrder,compulsory],programStageSections[id,displayName,sortOrder,dataElements[id,displayName,formName,valueType]]]',
       ].join(','),
     },
   });
@@ -226,17 +361,26 @@ function validateTemplateSelection(programMeta, dataType, programStageId) {
   }
 }
 
-async function resolveTemplateRows(req, { dataType, variant, programId, programStageId }) {
+async function resolveTemplateBundle(req, { dataType, variant, programId, programStageId }) {
   if (!programId) {
-    return buildGenericTemplateRows(dataType, variant);
+    const rows = buildGenericTemplateRows(dataType, variant);
+    return {
+      rows,
+      sections: buildGenericTemplateLayout(rows[0] || {}),
+      programMeta: null,
+    };
   }
 
   const programMeta = await fetchProgramTemplateMetadata(req, programId);
   validateTemplateSelection(programMeta, dataType, programStageId);
-  return buildProgramTemplateRows(programMeta, dataType, variant, programStageId);
+  return {
+    rows: buildProgramTemplateRows(programMeta, dataType, variant, programStageId),
+    sections: buildProgramTemplateLayout(programMeta, dataType, programStageId),
+    programMeta,
+  };
 }
 
-async function sendTemplateFile(res, rows, dataType, variant, format) {
+async function sendTemplateFile(res, { rows, sections, programMeta, dataType, variant, format, settings }) {
   const timestamp = new Date().toISOString().slice(0, 10);
   const fileBase = `template-${dataType}-${variant}-${timestamp}`;
 
@@ -248,7 +392,13 @@ async function sendTemplateFile(res, rows, dataType, variant, format) {
   }
 
   if (format === 'xlsx') {
-    const buffer = await jsonToExcel(rows);
+    const buffer = await buildTemplateWorkbook({
+      rows,
+      sections,
+      dataType,
+      programMeta,
+      templateSettings: settings,
+    });
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${fileBase}.xlsx"`);
     return res.send(buffer);
@@ -285,6 +435,10 @@ router.get('/template', async (req, res, next) => {
     const variant = String(req.query.variant || 'empty').toLowerCase();
     const programId = req.query.programId ? String(req.query.programId) : null;
     const programStageId = req.query.programStageId ? String(req.query.programStageId) : null;
+    const orgUnitScope = String(req.query.orgUnitScope || 'all');
+    const orgUnitIds = req.query.orgUnitIds ? String(req.query.orgUnitIds).split(',').map((v) => v.trim()).filter(Boolean) : [];
+    const language = String(req.query.language || 'en');
+    const layout = String(req.query.layout || 'horizontal').toLowerCase();
 
     if (!ALLOWED_TEMPLATE_TYPES.has(dataType)) {
       return res.status(400).json({ error: 'Invalid dataType for template download' });
@@ -298,13 +452,28 @@ router.get('/template', async (req, res, next) => {
       return res.status(400).json({ error: 'Invalid variant for template download' });
     }
 
-    const rows = await resolveTemplateRows(req, {
+    if (!ALLOWED_TEMPLATE_LAYOUTS.has(layout)) {
+      return res.status(400).json({ error: 'Invalid layout for template download' });
+    }
+
+    const bundle = await resolveTemplateBundle(req, {
       dataType,
       variant,
       programId,
       programStageId,
     });
-    await sendTemplateFile(res, rows, dataType, variant, format);
+    await sendTemplateFile(res, {
+      ...bundle,
+      dataType,
+      variant,
+      format,
+      settings: {
+        orgUnitScope,
+        orgUnitIds,
+        language,
+        layout,
+      },
+    });
   } catch (err) {
     next(err);
   }
@@ -329,17 +498,18 @@ router.get('/template/preview', async (req, res, next) => {
       return res.status(400).json({ error: 'Invalid variant for template preview' });
     }
 
-    const rows = await resolveTemplateRows(req, {
+    const bundle = await resolveTemplateBundle(req, {
       dataType,
       variant,
       programId,
       programStageId,
     });
 
-    const sampleRow = rows[0] || {};
+    const sampleRow = bundle.rows[0] || {};
     res.json({
       columns: Object.keys(sampleRow),
       sampleRow,
+      sections: bundle.sections,
       dataType,
       variant,
       programId,
