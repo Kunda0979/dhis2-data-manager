@@ -10,6 +10,7 @@ const { buildTrackerPayload, convertToTracker } = require('../utils/payloadBuild
 const { validateTrackerPayload } = require('../utils/payloadValidator');
 const { addHistoryEntry } = require('../services/historyService');
 const { buildIssueReport } = require('../utils/rowValidation');
+const { createDhis2Client } = require('../services/dhis2Client');
 
 const router = express.Router();
 
@@ -19,7 +20,16 @@ const ALLOWED_TEMPLATE_TYPES = new Set(['events', 'enrollments', 'trackedEntitie
 const ALLOWED_TEMPLATE_FORMATS = new Set(['json', 'csv', 'xlsx']);
 const ALLOWED_TEMPLATE_VARIANTS = new Set(['empty', 'prepopulated']);
 
-function buildTemplateRows(dataType, variant) {
+function uniqueById(items) {
+  const seen = new Set();
+  return items.filter((item) => {
+    if (!item?.id || seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
+}
+
+function buildGenericTemplateRows(dataType, variant) {
   const empty = variant === 'empty';
 
   if (dataType === 'events') {
@@ -57,6 +67,160 @@ function buildTemplateRows(dataType, variant) {
     attr_zDhUuAYrxNC: empty ? '' : 'Doe',
     attr_AxqcoiKURhU: empty ? '' : '1988-04-12',
   }];
+}
+
+function buildProgramTemplateRows(programMeta, dataType, variant, programStageId) {
+  const empty = variant === 'empty';
+  const row = {};
+  const sortedStages = [...(programMeta.programStages || [])].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+  const selectedStage = dataType === 'events'
+    ? sortedStages.find((stage) => stage.id === programStageId) || sortedStages[0] || null
+    : null;
+  const programAttributes = uniqueById([
+    ...((programMeta.programTrackedEntityAttributes || []).map((item) => item.trackedEntityAttribute).filter(Boolean)),
+    ...((programMeta.trackedEntityType?.trackedEntityTypeAttributes || []).map((item) => item.trackedEntityAttribute).filter(Boolean)),
+  ]);
+
+  if (dataType === 'trackedEntities') {
+    row.trackedEntity = empty ? '' : 'PMa2VCrupOd';
+    row.trackedEntityType = empty ? '' : programMeta.trackedEntityType?.id || '';
+    row.orgUnit = empty ? '' : 'DiszpKrYNg8';
+    for (const attr of programAttributes) {
+      row[`attr_${attr.id}`] = empty ? '' : sampleValueForType(attr.valueType, attr.displayName);
+    }
+    return [row];
+  }
+
+  if (dataType === 'enrollments') {
+    row.enrollment = empty ? '' : 'AaB3zKZ2CXY';
+    row.trackedEntity = empty ? '' : 'PMa2VCrupOd';
+    row.program = programMeta.id;
+    row.orgUnit = empty ? '' : 'DiszpKrYNg8';
+    row.enrolledAt = empty ? '' : '2026-03-30';
+    row.occurredAt = empty ? '' : '2026-03-30';
+    row.status = empty ? '' : 'ACTIVE';
+    return [row];
+  }
+
+  row.event = empty ? '' : 'vrr6fQh6vQf';
+  row.status = empty ? '' : 'ACTIVE';
+  row.program = programMeta.id;
+  row.programStage = selectedStage?.id || '';
+  row.orgUnit = empty ? '' : 'DiszpKrYNg8';
+  row.occurredAt = empty ? '' : '2026-03-31';
+  if (programMeta.programType === 'WITH_REGISTRATION') {
+    row.trackedEntity = empty ? '' : 'PMa2VCrupOd';
+    row.enrollment = empty ? '' : 'AaB3zKZ2CXY';
+  }
+
+  const stageElements = (selectedStage?.programStageDataElements || [])
+    .map((item) => item.dataElement)
+    .filter(Boolean);
+
+  for (const dataElement of stageElements) {
+    row[`de_${dataElement.id}`] = empty ? '' : sampleValueForType(dataElement.valueType, dataElement.displayName);
+  }
+
+  return [row];
+}
+
+function sampleValueForType(valueType, displayName) {
+  const label = (displayName || '').toLowerCase();
+  switch (valueType) {
+    case 'BOOLEAN':
+    case 'TRUE_ONLY':
+      return 'true';
+    case 'DATE':
+      return '2026-03-31';
+    case 'DATETIME':
+      return '2026-03-31T09:00:00';
+    case 'INTEGER':
+    case 'INTEGER_POSITIVE':
+    case 'INTEGER_NEGATIVE':
+    case 'INTEGER_ZERO_OR_POSITIVE':
+      return '1';
+    case 'NUMBER':
+    case 'PERCENTAGE':
+    case 'UNIT_INTERVAL':
+      return '12.5';
+    case 'EMAIL':
+      return 'user@example.org';
+    case 'PHONE_NUMBER':
+      return '+260977000000';
+    case 'AGE':
+      return '34';
+    case 'TEXT':
+    case 'LONG_TEXT':
+    case 'LETTER':
+      if (label.includes('first')) return 'John';
+      if (label.includes('last') || label.includes('surname')) return 'Doe';
+      if (label.includes('name')) return 'Sample value';
+      return 'Sample value';
+    default:
+      return 'Sample value';
+  }
+}
+
+async function fetchProgramTemplateMetadata(req, programId) {
+  const client = createDhis2Client(req);
+  const response = await client.get(`/api/programs/${programId}`, {
+    params: {
+      fields: [
+        'id',
+        'displayName',
+        'programType',
+        'trackedEntityType[id,displayName,trackedEntityTypeAttributes[trackedEntityAttribute[id,displayName,valueType]]]',
+        'programTrackedEntityAttributes[trackedEntityAttribute[id,displayName,valueType],mandatory]',
+        'programStages[id,displayName,sortOrder,programStageDataElements[dataElement[id,displayName,valueType],sortOrder]]',
+      ].join(','),
+    },
+  });
+  return response.data;
+}
+
+function validateTemplateSelection(programMeta, dataType, programStageId) {
+  if (programMeta.programType === 'WITHOUT_REGISTRATION' && dataType !== 'events') {
+    const err = new Error('Selected program supports only event templates');
+    err.status = 400;
+    throw err;
+  }
+
+  if (dataType === 'trackedEntities' && !programMeta.trackedEntityType?.id) {
+    const err = new Error('Selected program does not expose a tracked entity type for tracked entity templates');
+    err.status = 400;
+    throw err;
+  }
+
+  if (dataType !== 'events') return;
+
+  const stages = programMeta.programStages || [];
+  if (stages.length === 0) {
+    const err = new Error('Selected program has no stages for event templates');
+    err.status = 400;
+    throw err;
+  }
+
+  if (programStageId && !stages.some((stage) => stage.id === programStageId)) {
+    const err = new Error('Selected program stage does not belong to the selected program');
+    err.status = 400;
+    throw err;
+  }
+
+  if (!programStageId && stages.length > 1) {
+    const err = new Error('Please select a program stage for event template download');
+    err.status = 400;
+    throw err;
+  }
+}
+
+async function resolveTemplateRows(req, { dataType, variant, programId, programStageId }) {
+  if (!programId) {
+    return buildGenericTemplateRows(dataType, variant);
+  }
+
+  const programMeta = await fetchProgramTemplateMetadata(req, programId);
+  validateTemplateSelection(programMeta, dataType, programStageId);
+  return buildProgramTemplateRows(programMeta, dataType, variant, programStageId);
 }
 
 async function sendTemplateFile(res, rows, dataType, variant, format) {
@@ -106,6 +270,8 @@ router.get('/template', async (req, res, next) => {
     const dataType = String(req.query.dataType || 'events');
     const format = String(req.query.format || 'csv').toLowerCase();
     const variant = String(req.query.variant || 'empty').toLowerCase();
+    const programId = req.query.programId ? String(req.query.programId) : null;
+    const programStageId = req.query.programStageId ? String(req.query.programStageId) : null;
 
     if (!ALLOWED_TEMPLATE_TYPES.has(dataType)) {
       return res.status(400).json({ error: 'Invalid dataType for template download' });
@@ -119,8 +285,53 @@ router.get('/template', async (req, res, next) => {
       return res.status(400).json({ error: 'Invalid variant for template download' });
     }
 
-    const rows = buildTemplateRows(dataType, variant);
+    const rows = await resolveTemplateRows(req, {
+      dataType,
+      variant,
+      programId,
+      programStageId,
+    });
     await sendTemplateFile(res, rows, dataType, variant, format);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /api/import/template/preview
+ * Return template columns and a sample row for UI preview.
+ */
+router.get('/template/preview', async (req, res, next) => {
+  try {
+    const dataType = String(req.query.dataType || 'events');
+    const variant = String(req.query.variant || 'empty').toLowerCase();
+    const programId = req.query.programId ? String(req.query.programId) : null;
+    const programStageId = req.query.programStageId ? String(req.query.programStageId) : null;
+
+    if (!ALLOWED_TEMPLATE_TYPES.has(dataType)) {
+      return res.status(400).json({ error: 'Invalid dataType for template preview' });
+    }
+
+    if (!ALLOWED_TEMPLATE_VARIANTS.has(variant)) {
+      return res.status(400).json({ error: 'Invalid variant for template preview' });
+    }
+
+    const rows = await resolveTemplateRows(req, {
+      dataType,
+      variant,
+      programId,
+      programStageId,
+    });
+
+    const sampleRow = rows[0] || {};
+    res.json({
+      columns: Object.keys(sampleRow),
+      sampleRow,
+      dataType,
+      variant,
+      programId,
+      programStageId,
+    });
   } catch (err) {
     next(err);
   }

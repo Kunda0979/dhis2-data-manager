@@ -4,12 +4,14 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import {
   ApiOutlined,
   DownloadOutlined,
+  FileTextOutlined,
   UploadOutlined,
   HistoryOutlined,
   SettingOutlined,
 } from '@ant-design/icons'
 
 const menuItems = [
+  { key: '/downloads', icon: <FileTextOutlined />, label: 'Download Templates' },
   { key: '/export', icon: <DownloadOutlined />, label: 'Export Data' },
   { key: '/import', icon: <UploadOutlined />, label: 'Import Data' },
   { key: '/history', icon: <HistoryOutlined />, label: 'Job History' },

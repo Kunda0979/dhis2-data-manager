@@ -74,8 +74,18 @@ export function useDhis2Import() {
     return res.data
   }, [getHeaders])
 
-  const downloadTemplate = useCallback(async (dataType, variant, format) => {
-    const params = new URLSearchParams({ dataType, variant, format }).toString()
+  const downloadTemplate = useCallback(async (options = {}) => {
+    const {
+      dataType = 'events',
+      variant = 'empty',
+      format = 'csv',
+      programId,
+      programStageId,
+    } = options
+    const query = { dataType, variant, format }
+    if (programId) query.programId = programId
+    if (programStageId) query.programStageId = programStageId
+    const params = new URLSearchParams(query).toString()
     const res = await api.get(`/api/import/template?${params}`, {
       headers: getHeaders(),
       responseType: 'blob',
@@ -93,6 +103,23 @@ export function useDhis2Import() {
     URL.revokeObjectURL(link.href)
   }, [getHeaders])
 
+  const previewTemplate = useCallback(async (options = {}) => {
+    const {
+      dataType = 'events',
+      variant = 'empty',
+      programId,
+      programStageId,
+    } = options
+    const query = { dataType, variant }
+    if (programId) query.programId = programId
+    if (programStageId) query.programStageId = programStageId
+    const params = new URLSearchParams(query).toString()
+    const res = await api.get(`/api/import/template/preview?${params}`, {
+      headers: getHeaders(),
+    })
+    return res.data
+  }, [getHeaders])
+
   return {
     loading,
     error,
@@ -102,5 +129,6 @@ export function useDhis2Import() {
     importFile,
     checkJobStatus,
     downloadTemplate,
+    previewTemplate,
   }
 }

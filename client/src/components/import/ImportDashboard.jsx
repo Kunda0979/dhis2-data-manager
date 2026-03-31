@@ -6,7 +6,6 @@ import DataPreview from './DataPreview.jsx'
 import MappingEditor from './MappingEditor.jsx'
 import ValidationPanel from './ValidationPanel.jsx'
 import ImportResults from './ImportResults.jsx'
-import TemplateDownloadPanel from './TemplateDownloadPanel.jsx'
 import { useDhis2Import } from '../../hooks/useDhis2Import.js'
 import { csvToJson, readJsonFile } from '../../utils/fileConverters.js'
 import { useDhis2Metadata } from '../../hooks/useDhis2Metadata.js'
@@ -94,8 +93,6 @@ export default function ImportDashboard() {
     <div>
       <Card>
         <Steps current={step} items={STEPS} style={{ marginBottom: 24 }} size="small" />
-
-        {step === 0 && <TemplateDownloadPanel />}
 
         {step === 0 && (
           <FileUploader onFileSelect={handleFileSelect} />
