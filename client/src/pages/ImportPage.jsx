@@ -1,5 +1,6 @@
 import React from 'react'
 import { Typography } from 'antd'
+import { UploadOutlined } from '@ant-design/icons'
 import ImportDashboard from '../components/import/ImportDashboard.jsx'
 
 const { Title } = Typography
@@ -7,9 +8,38 @@ const { Title } = Typography
 export default function ImportPage() {
   return (
     <div>
-      <Title level={4} style={{ marginBottom: 16 }}>
-        Import Data
-      </Title>
+      <div
+        style={{
+          marginBottom: 20,
+          padding: '16px 20px',
+          background: '#fff',
+          borderRadius: 10,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+        }}
+      >
+        <div
+          style={{
+            width: 38,
+            height: 38,
+            borderRadius: 10,
+            background: 'linear-gradient(135deg, #059669, #34d399)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <UploadOutlined style={{ color: '#fff', fontSize: 16 }} />
+        </div>
+        <div>
+          <Title level={5} style={{ margin: 0 }}>Import Data</Title>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            Upload and map files to import data into DHIS2
+          </Typography.Text>
+        </div>
+      </div>
       <ImportDashboard />
     </div>
   )

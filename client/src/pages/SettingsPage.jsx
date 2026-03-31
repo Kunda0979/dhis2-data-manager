@@ -10,7 +10,7 @@ import {
   Divider,
   App,
 } from 'antd'
-import { SaveOutlined } from '@ant-design/icons'
+import { SaveOutlined, SettingOutlined } from '@ant-design/icons'
 
 const { Title, Text } = Typography
 
@@ -53,9 +53,38 @@ export default function SettingsPage() {
 
   return (
     <div>
-      <Title level={4} style={{ marginBottom: 16 }}>
-        Settings
-      </Title>
+      <div
+        style={{
+          marginBottom: 20,
+          padding: '16px 20px',
+          background: '#fff',
+          borderRadius: 10,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+        }}
+      >
+        <div
+          style={{
+            width: 38,
+            height: 38,
+            borderRadius: 10,
+            background: 'linear-gradient(135deg, #b45309, #fbbf24)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <SettingOutlined style={{ color: '#fff', fontSize: 16 }} />
+        </div>
+        <div>
+          <Title level={5} style={{ margin: 0 }}>Settings</Title>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            Configure default export and import preferences
+          </Typography.Text>
+        </div>
+      </div>
 
       <Card style={{ maxWidth: 520 }}>
         <Form form={form} layout="vertical" onFinish={handleSave} initialValues={settings}>

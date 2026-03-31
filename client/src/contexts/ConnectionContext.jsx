@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback } from 'react'
+import React, { createContext, useContext, useState, useCallback, useRef } from 'react'
 import api from '../services/api.js'
 
 const ConnectionContext = createContext(null)
@@ -10,6 +10,18 @@ export function ConnectionProvider({ children }) {
   const [connection, setConnection] = useState(null) // { url, username, user, serverInfo, id }
   const [connecting, setConnecting] = useState(false)
   const [connectionError, setConnectionError] = useState(null)
+  // True while the initial session-restore call is in-flight
+  const [restoringSession, setRestoringSession] = useState(() => !!sessionStorage.getItem(SESSION_TOKEN_KEY))
+  const sessionExpiredHandlerRef = useRef(null)
+
+  const clearSession = useCallback(() => {
+    setSessionToken('')
+    setProfiles([])
+    setConnection(null)
+    setConnectionError(null)
+    setRestoringSession(false)
+    sessionStorage.removeItem(SESSION_TOKEN_KEY)
+  }, [])
 
   const authHeaders = useCallback((token = sessionToken) => {
     if (!token) return {}
@@ -33,20 +45,19 @@ export function ConnectionProvider({ children }) {
     }
   }, [sessionToken])
 
-  const refreshProfiles = useCallback(async () => {
-    if (!sessionToken) return null
+  const refreshProfiles = useCallback(async (token = sessionToken) => {
+    if (!token) return null
     try {
-      const response = await api.get('/api/connect/profiles', { headers: authHeaders() })
+      const response = await api.get('/api/connect/profiles', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
       applySessionResponse(response.data)
       return response.data
     } catch {
-      setSessionToken('')
-      setProfiles([])
-      setConnection(null)
-      sessionStorage.removeItem(SESSION_TOKEN_KEY)
+      clearSession()
       return null
     }
-  }, [applySessionResponse, authHeaders, sessionToken])
+  }, [applySessionResponse, clearSession, sessionToken])
 
   const connect = useCallback(async (url, username, password, profileName) => {
     setConnecting(true)
@@ -99,22 +110,28 @@ export function ConnectionProvider({ children }) {
     if (sessionToken) {
       api.post('/api/connect/disconnect', {}, { headers: authHeaders() }).catch(() => undefined)
     }
-    setSessionToken('')
-    setProfiles([])
-    setConnection(null)
-    setConnectionError(null)
-    sessionStorage.removeItem(SESSION_TOKEN_KEY)
-  }, [authHeaders, sessionToken])
+    clearSession()
+  }, [authHeaders, clearSession, sessionToken])
 
   const getHeaders = useCallback(() => {
     return authHeaders()
   }, [authHeaders])
 
+  // On mount: if a token was stored, restore the session once.
   React.useEffect(() => {
-    if (sessionToken) {
-      refreshProfiles()
-    }
-  }, [refreshProfiles, sessionToken])
+    const storedToken = sessionStorage.getItem(SESSION_TOKEN_KEY)
+    if (!storedToken) return
+    refreshProfiles(storedToken).finally(() => setRestoringSession(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // intentionally run once on mount
+
+  // Listen for any 401 from the axios interceptor and clear the session.
+  React.useEffect(() => {
+    sessionExpiredHandlerRef.current = () => clearSession()
+    const handler = () => sessionExpiredHandlerRef.current?.()
+    window.addEventListener('dhis2:session-expired', handler)
+    return () => window.removeEventListener('dhis2:session-expired', handler)
+  }, [clearSession])
 
   return (
     <ConnectionContext.Provider
@@ -124,6 +141,7 @@ export function ConnectionProvider({ children }) {
         profiles,
         connecting,
         connectionError,
+        restoringSession,
         isConnected: !!sessionToken && !!connection,
         connect,
         switchProfile,
