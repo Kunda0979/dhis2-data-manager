@@ -183,13 +183,16 @@ async function buildTemplateWorkbook({
       const firstRow = rows[0] || {};
       const values = columns.map((column) => firstRow[column.key] ?? '');
       wsData.addRow(values);
+
+      // Keep technical keys for parser compatibility, but hide them from end users.
+      wsData.getRow(3).hidden = true;
       wsData.views = [{ state: 'frozen', ySplit: 4 }];
     }
   }
 
   const wsInstructions = wb.addWorksheet('Instructions');
   wsInstructions.columns = [{ header: 'Field', key: 'field', width: 26 }, { header: 'Value', key: 'value', width: 120 }];
-  wsInstructions.addRow({ field: 'How to use', value: 'Fill values in the Data sheet row(s). Do not edit row 3 technical keys. Import the completed file back through the Import page.' });
+  wsInstructions.addRow({ field: 'How to use', value: 'Fill values in the Data sheet row(s). Import the completed file back through the Import page.' });
   wsInstructions.addRow({ field: 'Template type', value: dataType });
   wsInstructions.addRow({ field: 'Program', value: programMeta?.displayName || '' });
   wsInstructions.addRow({ field: 'Program ID', value: programMeta?.id || '' });
