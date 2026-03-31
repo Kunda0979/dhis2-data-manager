@@ -62,11 +62,20 @@ function isSafeObjectKey(key) {
 
 const DHIS2_UID_LENGTH = 11;
 
+function parseTrackedIdFromKey(key, prefix) {
+  if (typeof key !== 'string') return null;
+  if (!key.startsWith(`${prefix}_`)) return null;
+  const rest = key.slice(prefix.length + 1);
+  const rawId = rest.split('__')[0];
+  return /^[A-Za-z0-9]{11}$/.test(rawId) ? rawId : null;
+}
+
 function buildEvent(row) {
   const dataValues = [];
   for (const [key, value] of Object.entries(row)) {
-    if (key.startsWith('de_') || (key.length === DHIS2_UID_LENGTH && /^[A-Za-z0-9]+$/.test(key))) {
-      const dataElement = key.startsWith('de_') ? key.slice(3) : key;
+    const dataElementId = parseTrackedIdFromKey(key, 'de');
+    if (dataElementId || (key.length === DHIS2_UID_LENGTH && /^[A-Za-z0-9]+$/.test(key))) {
+      const dataElement = dataElementId || key;
       dataValues.push({ dataElement, value });
     }
   }
@@ -100,8 +109,10 @@ function buildEnrollment(row) {
 function buildTrackedEntity(row) {
   const attributes = [];
   for (const [key, value] of Object.entries(row)) {
-    if (key.startsWith('attr_') || key.startsWith('tea_')) {
-      const attribute = key.startsWith('attr_') ? key.slice(5) : key.slice(4);
+    const attrId = parseTrackedIdFromKey(key, 'attr');
+    const teaId = parseTrackedIdFromKey(key, 'tea');
+    if (attrId || teaId) {
+      const attribute = attrId || teaId;
       attributes.push({ attribute, value });
     }
   }

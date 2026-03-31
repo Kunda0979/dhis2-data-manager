@@ -29,6 +29,19 @@ function uniqueById(items) {
   });
 }
 
+function sanitizeHeaderName(name) {
+  return String(name || '')
+    .trim()
+    .replace(/[^A-Za-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 80);
+}
+
+function buildTemplateFieldKey(prefix, id, displayName) {
+  const safeName = sanitizeHeaderName(displayName);
+  return safeName ? `${prefix}_${id}__${safeName}` : `${prefix}_${id}`;
+}
+
 function buildGenericTemplateRows(dataType, variant) {
   const empty = variant === 'empty';
 
@@ -86,7 +99,7 @@ function buildProgramTemplateRows(programMeta, dataType, variant, programStageId
     row.trackedEntityType = empty ? '' : programMeta.trackedEntityType?.id || '';
     row.orgUnit = empty ? '' : 'DiszpKrYNg8';
     for (const attr of programAttributes) {
-      row[`attr_${attr.id}`] = empty ? '' : sampleValueForType(attr.valueType, attr.displayName);
+      row[buildTemplateFieldKey('attr', attr.id, attr.displayName)] = empty ? '' : sampleValueForType(attr.valueType, attr.displayName);
     }
     return [row];
   }
@@ -118,7 +131,7 @@ function buildProgramTemplateRows(programMeta, dataType, variant, programStageId
     .filter(Boolean);
 
   for (const dataElement of stageElements) {
-    row[`de_${dataElement.id}`] = empty ? '' : sampleValueForType(dataElement.valueType, dataElement.displayName);
+    row[buildTemplateFieldKey('de', dataElement.id, dataElement.displayName)] = empty ? '' : sampleValueForType(dataElement.valueType, dataElement.displayName);
   }
 
   return [row];
