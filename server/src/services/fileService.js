@@ -203,6 +203,11 @@ function isBooleanValueType(valueType) {
   return type === 'BOOLEAN' || type === 'TRUE_ONLY';
 }
 
+function isTextLikeValueType(valueType) {
+  const type = String(valueType || '').toUpperCase();
+  return ['TEXT', 'LONG_TEXT', 'LETTER', 'EMAIL', 'PHONE_NUMBER'].includes(type);
+}
+
 function applyDataValidationForColumn(ws, colIndex, valueType, rowStart, rowEnd, listFormulaRange = null) {
   for (let rowNumber = rowStart; rowNumber <= rowEnd; rowNumber++) {
     const cell = ws.getCell(rowNumber, colIndex);
@@ -280,7 +285,7 @@ function styleTypedEntryCell(cell, { required, valueType, hasOptions, isExample 
   const type = String(valueType || 'TEXT').toUpperCase();
   styleDataEntryCell(cell, required);
 
-  if (type === 'LONG_TEXT') {
+  if (isTextLikeValueType(type) && !hasOptions) {
     cell.alignment = { vertical: 'top', wrapText: true };
   } else if (type === 'DATE') {
     cell.numFmt = 'yyyy-mm-dd';
@@ -677,6 +682,25 @@ async function buildTemplateWorkbook({
         }
       }
 
+      let eventRowNumber = null;
+      let orgUnitRowNumber = null;
+      for (let rowNumber = 2; rowNumber <= wsData.rowCount; rowNumber++) {
+        const keyRaw = String(wsData.getCell(rowNumber, 3).value || '');
+        const key = keyRaw.endsWith(' *') ? keyRaw.slice(0, -2) : keyRaw;
+        if (key === 'event') eventRowNumber = rowNumber;
+        if (key === 'orgUnit') orgUnitRowNumber = rowNumber;
+      }
+
+      if (eventRowNumber && orgUnitRowNumber) {
+        const eventCell = wsData.getCell(eventRowNumber, 5);
+        const orgUnitRef = `E${orgUnitRowNumber}`;
+        eventCell.value = {
+          formula: `IF(${orgUnitRef}="","","AUTO")`,
+          result: '',
+        };
+        eventCell.note = 'Leave as AUTO to generate a valid Event UID during upload.';
+      }
+
       wsData.getColumn(3).hidden = true;
       addValidationConditionalFormatting(wsData, 6, 2, wsData.rowCount);
       addDataEntryDashboard(wsData, {
@@ -714,6 +738,9 @@ async function buildTemplateWorkbook({
         qCell.value = column.label;
         applyTemplateHeaderStyle(qCell, column.required ? 'FFFCD34D' : 'FF60A5FA');
         qCell.note = `${column.required ? 'Required field. ' : 'Optional field. '}${sampleForValueType(column.valueType)}${optionRanges[column.key] ? ' Use the dropdown list.' : ''}`;
+        if (column.key === 'event') {
+          qCell.note = 'Leave blank or keep AUTO. A valid DHIS2 Event UID will be generated during upload.';
+        }
 
         const keyCell = wsData.getCell(3, c);
         keyCell.value = `${column.key}${column.required ? ' *' : ''}`;
@@ -872,6 +899,28 @@ async function buildTemplateWorkbook({
             isExample: rowNumber === dataStartRow,
           });
         });
+      }
+
+      const eventColIndex = columns.findIndex((col) => col.key === 'event');
+      const orgUnitColIndex = columns.findIndex((col) => col.key === 'orgUnit');
+      if (eventColIndex >= 0 && orgUnitColIndex >= 0) {
+        const eventCol = eventColIndex + dataStartCol;
+        const orgUnitCol = orgUnitColIndex + dataStartCol;
+        const eventColLetter = columnNumberToName(eventCol);
+        const orgUnitColLetter = columnNumberToName(orgUnitCol);
+
+        for (let rowNumber = dataStartRow; rowNumber <= dataEndRow; rowNumber++) {
+          const eventCell = wsData.getCell(rowNumber, eventCol);
+          if (!eventCell.value || String(eventCell.value).trim() === '') {
+            eventCell.value = {
+              formula: `IF(${orgUnitColLetter}${rowNumber}="","","AUTO")`,
+              result: '',
+            };
+          }
+        }
+
+        wsData.getCell(dataStartRow, eventCol).note = 'Example row. Event ID can stay AUTO and will be generated on upload.';
+        wsData.getCell(dataStartRow + 1, eventCol).note = 'Type your own Event UID or leave AUTO.';
       }
 
       const exampleRowFinal = wsData.getRow(dataStartRow);

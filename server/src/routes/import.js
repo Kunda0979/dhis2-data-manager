@@ -410,7 +410,12 @@ async function resolveTemplateBundle(req, { dataType, variant, programId, progra
 
 async function sendTemplateFile(res, { rows, sections, programMeta, dataType, variant, format, settings }) {
   const timestamp = new Date().toISOString().slice(0, 10);
-  const fileBase = `template-${dataType}-${variant}-${timestamp}`;
+  const safeProgramName = sanitizeHeaderName(programMeta?.displayName || '')
+    .replace(/_+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase();
+  const programPart = safeProgramName ? `${safeProgramName}-` : '';
+  const fileBase = `template-${programPart}${dataType}-${variant}-${timestamp}`;
 
   if (format === 'csv') {
     const csv = jsonToCsv(rows);
@@ -437,25 +442,48 @@ async function sendTemplateFile(res, { rows, sections, programMeta, dataType, va
   return res.send(JSON.stringify(rows, null, 2));
 }
 
-async function fetchOrgUnitEntries(req, orgUnitIds) {
-  if (!Array.isArray(orgUnitIds) || orgUnitIds.length === 0) return [];
+async function fetchOrgUnitEntries(req, orgUnitIds, orgUnitScope) {
   const client = createDhis2Client(req);
 
-  const entries = await Promise.all(orgUnitIds.map(async (id) => {
-    try {
-      const response = await client.get(`/api/organisationUnits/${id}`, {
-        params: { fields: 'id,displayName' },
-      });
-      return {
-        id: response.data?.id || id,
-        name: response.data?.displayName || id,
-      };
-    } catch {
-      return { id, name: id };
-    }
-  }));
+  // If specific org units were selected in the form, use those explicitly.
+  if (Array.isArray(orgUnitIds) && orgUnitIds.length > 0) {
+    const entries = await Promise.all(orgUnitIds.map(async (id) => {
+      try {
+        const response = await client.get(`/api/organisationUnits/${id}`, {
+          params: { fields: 'id,displayName' },
+        });
+        return {
+          id: response.data?.id || id,
+          name: response.data?.displayName || id,
+        };
+      } catch {
+        return { id, name: id };
+      }
+    }));
 
-  return entries;
+    return entries;
+  }
+
+  // For "all" scope, populate dropdown with available org units for the user.
+  if (String(orgUnitScope || '').toLowerCase() === 'all') {
+    try {
+      const response = await client.get('/api/organisationUnits', {
+        params: {
+          fields: 'id,displayName',
+          withinUserHierarchy: true,
+          paging: false,
+        },
+      });
+      const orgUnits = response.data?.organisationUnits || [];
+      return orgUnits
+        .filter((ou) => ou?.id && ou?.displayName)
+        .map((ou) => ({ id: ou.id, name: ou.displayName }));
+    } catch {
+      return [];
+    }
+  }
+
+  return [];
 }
 
 async function resolveOrgUnitNamesToIds(req, rows) {
@@ -648,7 +676,7 @@ router.get('/template', async (req, res, next) => {
       programId,
       programStageId,
     });
-    const orgUnitEntries = await fetchOrgUnitEntries(req, orgUnitIds);
+    const orgUnitEntries = await fetchOrgUnitEntries(req, orgUnitIds, orgUnitScope);
 
     await sendTemplateFile(res, {
       ...bundle,
