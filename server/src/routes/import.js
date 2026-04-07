@@ -5,7 +5,14 @@ const upload = require('../middleware/upload');
 const { validateImportRequest } = require('../middleware/validate');
 const { importLimiter } = require('../middleware/rateLimiter');
 const { importTrackerData, getJobStatus } = require('../services/importService');
-const { csvToJson, excelToJson, jsonToCsv, buildTemplateWorkbook } = require('../services/fileService');
+const {
+  csvToJson,
+  excelToJson,
+  excelToJsonWithMetadata,
+  jsonToCsv,
+  buildTemplateWorkbook,
+  TEMPLATE_SCHEMA_VERSION,
+} = require('../services/fileService');
 const { buildTrackerPayload, convertToTracker } = require('../utils/payloadBuilder');
 const { validateTrackerPayload } = require('../utils/payloadValidator');
 const { addHistoryEntry } = require('../services/historyService');
@@ -505,6 +512,104 @@ function parseMapping(mappingRaw) {
   }
 }
 
+function parseJsonMeta(value, fallback) {
+  if (!value) return fallback;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
+
+async function buildCompatibilityReport(req, { rows, metadata = {}, dataType }) {
+  const report = {
+    passedChecks: [],
+    warnings: [],
+    blockingIssues: [],
+    rowIssues: [],
+  };
+
+  if (!metadata.templateVersion) {
+    report.warnings.push('Template metadata not found. Compatibility checks are limited.');
+    return report;
+  }
+
+  if (metadata.templateVersion === TEMPLATE_SCHEMA_VERSION) {
+    report.passedChecks.push(`Template schema version ${metadata.templateVersion} is supported.`);
+  } else {
+    report.blockingIssues.push(
+      `Template schema version ${metadata.templateVersion} is not supported by server version ${TEMPLATE_SCHEMA_VERSION}. Please re-download the latest template.`,
+    );
+  }
+
+  const programId = String(metadata.programId || '').trim();
+  const programStageId = String(metadata.programStageId || '').trim();
+  if (!programId) {
+    report.warnings.push('Program metadata missing in template. Program drift checks were skipped.');
+    return report;
+  }
+
+  let programMeta;
+  try {
+    programMeta = await fetchProgramTemplateMetadata(req, programId);
+    report.passedChecks.push('Program metadata is reachable in DHIS2.');
+  } catch {
+    report.blockingIssues.push('Program in template could not be resolved in DHIS2. Re-download template.');
+    return report;
+  }
+
+  if (programStageId && !(programMeta.programStages || []).some((stage) => stage.id === programStageId)) {
+    report.blockingIssues.push('Program stage in template no longer exists in DHIS2. Re-download template.');
+  } else if (programStageId) {
+    report.passedChecks.push('Program stage exists in DHIS2.');
+  }
+
+  const fieldKeys = parseJsonMeta(metadata.fieldKeys, []);
+  if (Array.isArray(fieldKeys) && fieldKeys.length > 0) {
+    const layout = buildProgramTemplateLayout(programMeta, dataType, programStageId);
+    const currentKeys = new Set();
+    for (const section of layout) {
+      for (const q of section.questions || []) {
+        currentKeys.add(q.key);
+      }
+    }
+    const missingKeys = fieldKeys.filter((key) => typeof key === 'string' && (key.startsWith('de_') || key.startsWith('attr_')) && !currentKeys.has(key));
+    if (missingKeys.length > 0) {
+      report.blockingIssues.push(`Template fields not found in latest DHIS2 metadata: ${missingKeys.slice(0, 8).join(', ')}${missingKeys.length > 8 ? ' ...' : ''}`);
+    } else {
+      report.passedChecks.push('Template field snapshot matches latest DHIS2 metadata.');
+    }
+  }
+
+  const optionMap = parseJsonMeta(metadata.optionMap, {});
+  if (optionMap && typeof optionMap === 'object') {
+    const optionIssues = [];
+    rows.forEach((row, index) => {
+      for (const [key, allowed] of Object.entries(optionMap)) {
+        if (!Array.isArray(allowed) || allowed.length === 0) continue;
+        const value = String(row?.[key] || '').trim();
+        if (!value) continue;
+        if (!allowed.includes(value)) {
+          optionIssues.push({ row: index + 1, field: key, value, allowed: allowed.slice(0, 10) });
+        }
+      }
+    });
+    if (optionIssues.length > 0) {
+      report.rowIssues.push(...optionIssues.map((issue) => ({
+        row: issue.row,
+        field: issue.field,
+        message: `Value '${issue.value}' is not in allowed options`,
+        suggestion: `Allowed values include: ${issue.allowed.join(', ')}`,
+      })));
+      report.blockingIssues.push('Some rows contain values outside allowed option sets.');
+    } else {
+      report.passedChecks.push('Option set values are valid for the uploaded rows.');
+    }
+  }
+
+  return report;
+}
+
 /**
  * GET /api/import/template
  * Download import templates (empty or pre-populated).
@@ -626,6 +731,7 @@ router.post('/tracker', importLimiter, validateImportRequest, upload.single('fil
 
     let payload;
     let rows = [];
+    let templateMetadata = {};
 
     if (ext === '.json') {
       const json = JSON.parse(req.file.buffer.toString('utf8'));
@@ -635,11 +741,25 @@ router.post('/tracker', importLimiter, validateImportRequest, upload.single('fil
       rows = await resolveOrgUnitNamesToIds(req, rows);
       payload = buildTrackerPayload(rows, mapping, dataType);
     } else if (ext === '.xlsx' || ext === '.xls') {
-      rows = await excelToJson(req.file.buffer);
+      const parsed = await excelToJsonWithMetadata(req.file.buffer);
+      rows = parsed.rows;
+      templateMetadata = parsed.metadata || {};
       rows = await resolveOrgUnitNamesToIds(req, rows);
       payload = buildTrackerPayload(rows, mapping, dataType);
     } else {
       return res.status(400).json({ error: 'Unsupported file format' });
+    }
+
+    const compatibility = await buildCompatibilityReport(req, {
+      rows,
+      metadata: templateMetadata,
+      dataType,
+    });
+    if (compatibility.blockingIssues.length > 0) {
+      return res.status(422).json({
+        error: 'Template compatibility checks failed',
+        compatibility,
+      });
     }
 
     // Validate before sending
@@ -651,6 +771,7 @@ router.post('/tracker', importLimiter, validateImportRequest, upload.single('fil
         errors: validation.errors,
         warnings: validation.warnings,
         rowIssues: issueReport,
+        compatibility,
       });
     }
 
@@ -675,6 +796,7 @@ router.post('/tracker', importLimiter, validateImportRequest, upload.single('fil
       success: true,
       result,
       warnings: validation.warnings,
+      compatibility,
     });
   } catch (err) {
     next(err);
@@ -697,6 +819,7 @@ router.post('/validate', importLimiter, validateImportRequest, upload.single('fi
 
     let payload;
     let rows = [];
+    let templateMetadata = {};
 
     if (ext === '.json') {
       const json = JSON.parse(req.file.buffer.toString('utf8'));
@@ -706,12 +829,20 @@ router.post('/validate', importLimiter, validateImportRequest, upload.single('fi
       rows = await resolveOrgUnitNamesToIds(req, rows);
       payload = buildTrackerPayload(rows, mapping, dataType);
     } else if (ext === '.xlsx' || ext === '.xls') {
-      rows = await excelToJson(req.file.buffer);
+      const parsed = await excelToJsonWithMetadata(req.file.buffer);
+      rows = parsed.rows;
+      templateMetadata = parsed.metadata || {};
       rows = await resolveOrgUnitNamesToIds(req, rows);
       payload = buildTrackerPayload(rows, mapping, dataType);
     } else {
       return res.status(400).json({ error: 'Unsupported file format' });
     }
+
+    const compatibility = await buildCompatibilityReport(req, {
+      rows,
+      metadata: templateMetadata,
+      dataType,
+    });
 
     const validation = validateTrackerPayload(payload);
     const issueReport = buildIssueReport(rows, mapping, dataType);
@@ -726,6 +857,7 @@ router.post('/validate', importLimiter, validateImportRequest, upload.single('fi
       errors: validation.errors,
       warnings: validation.warnings,
       rowIssues: issueReport,
+      compatibility,
       counts,
       preview: {
         events: payload.events ? payload.events.slice(0, 5) : [],

@@ -5,7 +5,7 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "nodemon src/index.js",
+    "dev": "printf 'Testing links:\nhttp://localhost:3000\nhttp://localhost:4000\nhttp://localhost:4000/health\n\n' && nodemon src/index.js",
     "test": "node --test"
   },
   "dependencies": {

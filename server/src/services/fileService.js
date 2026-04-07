@@ -4,6 +4,8 @@ const { stringify } = require('csv-stringify/sync');
 const { parse } = require('csv-parse/sync');
 
 const FORMULA_PREFIXES = ['=', '+', '-', '@'];
+const TEMPLATE_SCHEMA_VERSION = '2.0.0';
+const TEMPLATE_GENERATOR_VERSION = '2026.04.07';
 
 function sanitizeSpreadsheetValue(value) {
   if (value === null || value === undefined) return '';
@@ -222,6 +224,9 @@ function applyDataValidationForColumn(ws, colIndex, valueType, rowStart, rowEnd,
         type: 'date',
         operator: 'greaterThan',
         formulae: [new Date('1900-01-01')],
+        showInputMessage: true,
+        promptTitle: 'Date input',
+        prompt: 'Use the calendar/date picker in your spreadsheet app and keep format YYYY-MM-DD.',
         showErrorMessage: true,
         errorTitle: 'Invalid date',
         error: 'Use a valid date in YYYY-MM-DD format.',
@@ -264,7 +269,7 @@ function styleDataEntryCell(cell, required) {
 
 function sampleForValueType(valueType) {
   const type = String(valueType || 'TEXT').toUpperCase();
-  if (type === 'DATE') return 'Example: 2026-04-07';
+  if (type === 'DATE') return 'Example: 2026-04-07 (use date picker/calendar)';
   if (type === 'DATETIME') return 'Example: 2026-04-07T13:30:00';
   if (isNumericValueType(type)) return 'Example: 12.5';
   if (isBooleanValueType(type)) return 'Example: true / false';
@@ -272,7 +277,14 @@ function sampleForValueType(valueType) {
 }
 
 function styleTypedEntryCell(cell, { required, valueType, hasOptions, isExample }) {
+  const type = String(valueType || 'TEXT').toUpperCase();
   styleDataEntryCell(cell, required);
+
+  if (type === 'LONG_TEXT') {
+    cell.alignment = { vertical: 'top', wrapText: true };
+  } else if (type === 'DATE') {
+    cell.numFmt = 'yyyy-mm-dd';
+  }
 
   if (isExample) {
     cell.fill = {
@@ -445,6 +457,26 @@ function buildHorizontalMissingRequiredFormula(rowNumber, columns, statusCol) {
   return `IF(${statusRef}<>"Missing required fields","",TEXTJOIN("",TRUE,${missingChecks.join(',')}))`;
 }
 
+function buildHorizontalRowQualityFormula(rowNumber, statusCol, missingCol) {
+  const statusRef = `${columnNumberToName(statusCol)}${rowNumber}`;
+  const missingRef = `${columnNumberToName(missingCol)}${rowNumber}`;
+  return `IF(${statusRef}="", "", IF(${statusRef}="Ready", 100, MAX(0, 100 - LEN(${missingRef})*2)))`;
+}
+
+function buildHorizontalFirstIssueFormula(rowNumber, statusCol, missingCol) {
+  const statusRef = `${columnNumberToName(statusCol)}${rowNumber}`;
+  const missingRef = `${columnNumberToName(missingCol)}${rowNumber}`;
+  return `IF(${statusRef}="", "", IF(${statusRef}="Ready", "No blocking issue", IF(${missingRef}="", "Check required fields", LEFT(${missingRef}, 120))))`;
+}
+
+function buildVerticalRowQualityFormula(rowNumber) {
+  return `IF(F${rowNumber}="", "", IF(F${rowNumber}="Ready", 100, IF(G${rowNumber}="", 80, 40)))`;
+}
+
+function buildVerticalFirstIssueFormula(rowNumber) {
+  return `IF(F${rowNumber}="", "", IF(F${rowNumber}="Ready", "No blocking issue", IF(G${rowNumber}="", "Check required fields", G${rowNumber})))`;
+}
+
 function reorderColumnsForEntry(columns) {
   const groups = new Map();
   const order = [];
@@ -467,6 +499,12 @@ function reorderColumnsForEntry(columns) {
   }
 
   return ordered;
+}
+
+function defaultStatusOptionsByType(dataType) {
+  if (dataType === 'enrollments') return ['ACTIVE', 'COMPLETED', 'CANCELLED'];
+  if (dataType === 'events') return ['ACTIVE', 'COMPLETED', 'VISITED', 'SCHEDULE', 'OVERDUE', 'SKIPPED'];
+  return ['ACTIVE', 'COMPLETED', 'CANCELLED'];
 }
 
 async function buildTemplateWorkbook({
@@ -496,13 +534,24 @@ async function buildTemplateWorkbook({
 
   const fallbackColumns = rows[0] ? Object.keys(rows[0]).map((key) => ({ key, label: key, valueType: 'TEXT', required: false, sectionName: 'Template Fields' })) : [];
   const columns = reorderColumnsForEntry((flatQuestions.length > 0 ? flatQuestions : fallbackColumns).map((column) => {
-    if (column.key !== 'orgUnit') return column;
-    const scopedOrgUnits = (templateSettings.orgUnitNames || []).filter(Boolean);
-    if (scopedOrgUnits.length === 0) return column;
-    return {
-      ...column,
-      options: scopedOrgUnits,
-    };
+    if (column.key === 'orgUnit') {
+      const scopedOrgUnits = (templateSettings.orgUnitNames || []).filter(Boolean);
+      if (scopedOrgUnits.length > 0) {
+        return {
+          ...column,
+          options: scopedOrgUnits,
+        };
+      }
+    }
+
+    if (column.key === 'status' && (!Array.isArray(column.options) || column.options.length === 0)) {
+      return {
+        ...column,
+        options: defaultStatusOptionsByType(dataType),
+      };
+    }
+
+    return column;
   }));
   const optionRanges = buildOptionListRanges(wb, columns);
 
@@ -539,9 +588,11 @@ async function buildTemplateWorkbook({
         { header: 'Value', key: 'value', width: 28 },
         { header: 'Row Status', key: 'validation', width: 28 },
         { header: 'Missing Required', key: 'missingRequired', width: 36 },
+        { header: 'Row Quality', key: 'rowQualityScore', width: 16 },
+        { header: 'First Issue', key: 'firstIssue', width: 40 },
       ];
 
-      ['A1', 'B1', 'C1', 'D1', 'E1', 'F1', 'G1'].forEach((address) => {
+      ['A1', 'B1', 'C1', 'D1', 'E1', 'F1', 'G1', 'H1', 'I1'].forEach((address) => {
         applyTemplateHeaderStyle(wsData.getCell(address), 'FF93C5FD');
       });
 
@@ -555,6 +606,8 @@ async function buildTemplateWorkbook({
           value: firstRow[column.key] ?? '',
           validation: '',
           missingRequired: '',
+          rowQualityScore: '',
+          firstIssue: '',
         });
       }
 
@@ -611,6 +664,14 @@ async function buildTemplateWorkbook({
         missingCell.font = { color: { argb: 'FF991B1B' } };
         missingCell.protection = { locked: true };
 
+        const qualityCell = wsData.getCell(rowNumber, 8);
+        qualityCell.value = { formula: buildVerticalRowQualityFormula(rowNumber), result: '' };
+        qualityCell.protection = { locked: true };
+
+        const firstIssueCell = wsData.getCell(rowNumber, 9);
+        firstIssueCell.value = { formula: buildVerticalFirstIssueFormula(rowNumber), result: '' };
+        firstIssueCell.protection = { locked: true };
+
         if (shouldHideTemplateKey(key, programMeta)) {
           wsData.getRow(rowNumber).hidden = true;
         }
@@ -623,7 +684,7 @@ async function buildTemplateWorkbook({
         missingCol: 7,
         dataStartRow: 2,
         dataEndRow: wsData.rowCount,
-        dashboardCol: 9,
+        dashboardCol: 11,
       });
 
       wsData.views = [{ state: 'frozen', ySplit: 1, xSplit: 2 }];
@@ -670,6 +731,8 @@ async function buildTemplateWorkbook({
 
       const validationCol = columns.length + 1;
       const missingCol = columns.length + 2;
+      const qualityCol = columns.length + 3;
+      const firstIssueCol = columns.length + 4;
       const validationSectionCell = wsData.getCell(1, validationCol);
       validationSectionCell.value = 'Template Checks';
       applyTemplateHeaderStyle(validationSectionCell, 'FFC7D2FE');
@@ -706,10 +769,44 @@ async function buildTemplateWorkbook({
       applyTemplateHeaderStyle(missingTypeCell, 'FFE2E8F0');
       wsData.getColumn(missingCol).width = 44;
 
+      const qualitySectionCell = wsData.getCell(1, qualityCol);
+      qualitySectionCell.value = 'Template Checks';
+      applyTemplateHeaderStyle(qualitySectionCell, 'FFE2E8F0');
+
+      const qualityHeaderCell = wsData.getCell(2, qualityCol);
+      qualityHeaderCell.value = 'Row Quality';
+      applyTemplateHeaderStyle(qualityHeaderCell, 'FFCBD5E1');
+
+      const qualityKeyCell = wsData.getCell(3, qualityCol);
+      qualityKeyCell.value = 'rowQualityScore';
+      applyTemplateHeaderStyle(qualityKeyCell, 'FFE2E8F0');
+
+      const qualityTypeCell = wsData.getCell(4, qualityCol);
+      qualityTypeCell.value = 'NUMBER';
+      applyTemplateHeaderStyle(qualityTypeCell, 'FFE2E8F0');
+      wsData.getColumn(qualityCol).width = 16;
+
+      const firstIssueSectionCell = wsData.getCell(1, firstIssueCol);
+      firstIssueSectionCell.value = 'Template Checks';
+      applyTemplateHeaderStyle(firstIssueSectionCell, 'FFE2E8F0');
+
+      const firstIssueHeaderCell = wsData.getCell(2, firstIssueCol);
+      firstIssueHeaderCell.value = 'First Issue';
+      applyTemplateHeaderStyle(firstIssueHeaderCell, 'FFCBD5E1');
+
+      const firstIssueKeyCell = wsData.getCell(3, firstIssueCol);
+      firstIssueKeyCell.value = 'firstIssue';
+      applyTemplateHeaderStyle(firstIssueKeyCell, 'FFE2E8F0');
+
+      const firstIssueTypeCell = wsData.getCell(4, firstIssueCol);
+      firstIssueTypeCell.value = 'TEXT';
+      applyTemplateHeaderStyle(firstIssueTypeCell, 'FFE2E8F0');
+      wsData.getColumn(firstIssueCol).width = 40;
+
       const firstRow = rows[0] || {};
       const values = columns.map((column) => firstRow[column.key] ?? '');
-      wsData.addRow([...values, '', '']);
-      wsData.addRow([...columns.map(() => ''), '', '']);
+      wsData.addRow([...values, '', '', '', '']);
+      wsData.addRow([...columns.map(() => ''), '', '', '', '']);
 
       for (let rowNumber = dataStartRow; rowNumber <= dataEndRow; rowNumber++) {
         const checkCell = wsData.getCell(rowNumber, validationCol);
@@ -747,6 +844,20 @@ async function buildTemplateWorkbook({
           right: { style: 'thin', color: { argb: 'FFE2E8F0' } },
         };
         missingCell.font = { color: { argb: 'FF991B1B' } };
+
+        const qualityCell = wsData.getCell(rowNumber, qualityCol);
+        qualityCell.value = {
+          formula: buildHorizontalRowQualityFormula(rowNumber, validationCol, missingCol),
+          result: '',
+        };
+        qualityCell.protection = { locked: true };
+
+        const firstIssueCell = wsData.getCell(rowNumber, firstIssueCol);
+        firstIssueCell.value = {
+          formula: buildHorizontalFirstIssueFormula(rowNumber, validationCol, missingCol),
+          result: '',
+        };
+        firstIssueCell.protection = { locked: true };
       }
 
       addValidationConditionalFormatting(wsData, validationCol, dataStartRow, dataEndRow);
@@ -811,13 +922,19 @@ async function buildTemplateWorkbook({
       wsData.getColumn(missingCol).eachCell((cell) => {
         cell.protection = { locked: true };
       });
+      wsData.getColumn(qualityCol).eachCell((cell) => {
+        cell.protection = { locked: true };
+      });
+      wsData.getColumn(firstIssueCol).eachCell((cell) => {
+        cell.protection = { locked: true };
+      });
 
       addDataEntryDashboard(wsData, {
         statusCol: validationCol,
         missingCol,
         dataStartRow,
         dataEndRow,
-        dashboardCol: missingCol + 2,
+        dashboardCol: firstIssueCol + 2,
       });
 
       // Keep technical keys for parser compatibility, but hide them from end users.
@@ -855,6 +972,28 @@ async function buildTemplateWorkbook({
     type: programMeta?.programType || '',
     tet: programMeta?.trackedEntityType?.displayName || '',
   });
+
+  const wsTemplateMeta = wb.addWorksheet('Template Meta');
+  wsTemplateMeta.columns = [
+    { header: 'Key', key: 'key', width: 34 },
+    { header: 'Value', key: 'value', width: 120 },
+  ];
+  const optionMap = {};
+  for (const col of columns) {
+    if (Array.isArray(col.options) && col.options.length) {
+      optionMap[col.key] = col.options;
+    }
+  }
+  wsTemplateMeta.addRow({ key: 'templateVersion', value: TEMPLATE_SCHEMA_VERSION });
+  wsTemplateMeta.addRow({ key: 'generatorVersion', value: TEMPLATE_GENERATOR_VERSION });
+  wsTemplateMeta.addRow({ key: 'generatedAt', value: new Date().toISOString() });
+  wsTemplateMeta.addRow({ key: 'dataType', value: dataType });
+  wsTemplateMeta.addRow({ key: 'layout', value: layout });
+  wsTemplateMeta.addRow({ key: 'programId', value: programMeta?.id || '' });
+  wsTemplateMeta.addRow({ key: 'programName', value: programMeta?.displayName || '' });
+  wsTemplateMeta.addRow({ key: 'programStageId', value: rows?.[0]?.programStage || '' });
+  wsTemplateMeta.addRow({ key: 'fieldKeys', value: JSON.stringify(columns.map((c) => c.key)) });
+  wsTemplateMeta.addRow({ key: 'optionMap', value: JSON.stringify(optionMap) });
 
   const wsRules = wb.addWorksheet('Program Rules');
   wsRules.columns = [
@@ -944,6 +1083,7 @@ async function buildTemplateWorkbook({
   wsProgram.state = 'hidden';
   wsOrgUnits.state = 'hidden';
   wsElements.state = 'hidden';
+  wsTemplateMeta.state = 'veryHidden';
 
   return wb.xlsx.writeBuffer();
 }
@@ -984,7 +1124,7 @@ async function excelToJson(buffer) {
       const keyRaw = String(keyCell).trim();
       if (!keyRaw) continue;
       const key = keyRaw.endsWith(' *') ? keyRaw.slice(0, -2) : keyRaw;
-      if (!key || key === 'validationNotes' || key === 'missingRequiredFields') continue;
+      if (!key || ['validationNotes', 'missingRequiredFields', 'rowQualityScore', 'firstIssue'].includes(key)) continue;
       rowObj[key] = valueCell !== null && valueCell !== undefined ? String(valueCell) : '';
     }
     return Object.keys(rowObj).length > 0 ? [rowObj] : [];
@@ -998,7 +1138,7 @@ async function excelToJson(buffer) {
       headers = values.map((v, i) => {
         const raw = v !== null && v !== undefined ? String(v).trim() : '';
         const normalized = raw.endsWith(' *') ? raw.slice(0, -2) : (raw || `col${i + 1}`);
-        if (normalized === 'validationNotes' || normalized === 'missingRequiredFields') return null;
+        if (['validationNotes', 'missingRequiredFields', 'rowQualityScore', 'firstIssue'].includes(normalized)) return null;
         return normalized;
       });
     } else if (rowNumber > headerRowIndex) {
@@ -1017,4 +1157,33 @@ async function excelToJson(buffer) {
   return rows;
 }
 
-module.exports = { jsonToCsv, jsonToExcel, jsonToPdf, buildTemplateWorkbook, csvToJson, excelToJson };
+async function excelToJsonWithMetadata(buffer) {
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buffer);
+
+  const metaSheet = wb.getWorksheet('Template Meta');
+  const metadata = {};
+  if (metaSheet) {
+    for (let rowNumber = 2; rowNumber <= metaSheet.rowCount; rowNumber++) {
+      const key = String(metaSheet.getCell(rowNumber, 1).value || '').trim();
+      if (!key) continue;
+      const value = metaSheet.getCell(rowNumber, 2).value;
+      metadata[key] = value === null || value === undefined ? '' : String(value);
+    }
+  }
+
+  const rows = await excelToJson(buffer);
+  return { rows, metadata };
+}
+
+module.exports = {
+  jsonToCsv,
+  jsonToExcel,
+  jsonToPdf,
+  buildTemplateWorkbook,
+  csvToJson,
+  excelToJson,
+  excelToJsonWithMetadata,
+  TEMPLATE_SCHEMA_VERSION,
+  TEMPLATE_GENERATOR_VERSION,
+};
