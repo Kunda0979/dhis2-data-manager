@@ -20,6 +20,7 @@ const ALLOWED_TEMPLATE_TYPES = new Set(['events', 'enrollments', 'trackedEntitie
 const ALLOWED_TEMPLATE_FORMATS = new Set(['json', 'csv', 'xlsx']);
 const ALLOWED_TEMPLATE_VARIANTS = new Set(['empty', 'prepopulated']);
 const ALLOWED_TEMPLATE_LAYOUTS = new Set(['horizontal', 'vertical']);
+const DHIS2_UID_PATTERN = /^[A-Za-z0-9]{11}$/;
 
 function uniqueById(items) {
   const seen = new Set();
@@ -338,6 +339,8 @@ async function fetchProgramTemplateMetadata(req, programId) {
         'trackedEntityType[id,displayName,trackedEntityTypeAttributes[trackedEntityAttribute[id,displayName,valueType,optionSet[id,options[id,code,name,displayName]]]]]',
         'programTrackedEntityAttributes[trackedEntityAttribute[id,displayName,valueType,optionSet[id,options[id,code,name,displayName]]],mandatory]',
         'programStages[id,displayName,sortOrder,programStageDataElements[dataElement[id,displayName,formName,valueType,optionSet[id,options[id,code,name,displayName]]],sortOrder,compulsory],programStageSections[id,displayName,sortOrder,dataElements[id,displayName,formName,valueType,optionSet[id,options[id,code,name,displayName]]]]]',
+        'programRuleVariables[id,displayName,name,programRuleVariableSourceType,dataElement[id,displayName],trackedEntityAttribute[id,displayName],programStage[id,displayName]]',
+        'programRules[id,displayName,condition,programRuleActions[id,programRuleActionType,data,content,location,template],programRuleRuleVariables[programRuleVariable[id,displayName,name]]]',
       ].join(','),
     },
   });
@@ -427,6 +430,66 @@ async function sendTemplateFile(res, { rows, sections, programMeta, dataType, va
   return res.send(JSON.stringify(rows, null, 2));
 }
 
+async function fetchOrgUnitEntries(req, orgUnitIds) {
+  if (!Array.isArray(orgUnitIds) || orgUnitIds.length === 0) return [];
+  const client = createDhis2Client(req);
+
+  const entries = await Promise.all(orgUnitIds.map(async (id) => {
+    try {
+      const response = await client.get(`/api/organisationUnits/${id}`, {
+        params: { fields: 'id,displayName' },
+      });
+      return {
+        id: response.data?.id || id,
+        name: response.data?.displayName || id,
+      };
+    } catch {
+      return { id, name: id };
+    }
+  }));
+
+  return entries;
+}
+
+async function resolveOrgUnitNamesToIds(req, rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return rows;
+
+  const names = [...new Set(rows
+    .map((row) => String(row?.orgUnit || '').trim())
+    .filter((value) => value && !DHIS2_UID_PATTERN.test(value)))];
+
+  if (names.length === 0) return rows;
+
+  const client = createDhis2Client(req);
+  const mapping = new Map();
+
+  await Promise.all(names.map(async (name) => {
+    try {
+      const response = await client.get('/api/organisationUnits', {
+        params: {
+          fields: 'id,displayName',
+          filter: `displayName:eq:${name}`,
+          paging: false,
+        },
+      });
+      const resolved = response.data?.organisationUnits?.[0];
+      if (resolved?.id) {
+        mapping.set(name, resolved.id);
+      }
+    } catch {
+      // Keep original value if resolution fails; downstream validation will flag it.
+    }
+  }));
+
+  return rows.map((row) => {
+    const source = String(row?.orgUnit || '').trim();
+    if (!source || DHIS2_UID_PATTERN.test(source)) return row;
+    const mapped = mapping.get(source);
+    if (!mapped) return row;
+    return { ...row, orgUnit: mapped };
+  });
+}
+
 function parseMapping(mappingRaw) {
   if (!mappingRaw) return {};
   try {
@@ -480,6 +543,8 @@ router.get('/template', async (req, res, next) => {
       programId,
       programStageId,
     });
+    const orgUnitEntries = await fetchOrgUnitEntries(req, orgUnitIds);
+
     await sendTemplateFile(res, {
       ...bundle,
       dataType,
@@ -488,6 +553,8 @@ router.get('/template', async (req, res, next) => {
       settings: {
         orgUnitScope,
         orgUnitIds,
+        orgUnitNames: orgUnitEntries.map((entry) => entry.name).filter(Boolean),
+        orgUnitEntries,
         language,
         layout,
       },
@@ -565,9 +632,11 @@ router.post('/tracker', importLimiter, validateImportRequest, upload.single('fil
       payload = convertToTracker(json);
     } else if (ext === '.csv') {
       rows = csvToJson(req.file.buffer);
+      rows = await resolveOrgUnitNamesToIds(req, rows);
       payload = buildTrackerPayload(rows, mapping, dataType);
     } else if (ext === '.xlsx' || ext === '.xls') {
       rows = await excelToJson(req.file.buffer);
+      rows = await resolveOrgUnitNamesToIds(req, rows);
       payload = buildTrackerPayload(rows, mapping, dataType);
     } else {
       return res.status(400).json({ error: 'Unsupported file format' });
@@ -634,9 +703,11 @@ router.post('/validate', importLimiter, validateImportRequest, upload.single('fi
       payload = convertToTracker(json);
     } else if (ext === '.csv') {
       rows = csvToJson(req.file.buffer);
+      rows = await resolveOrgUnitNamesToIds(req, rows);
       payload = buildTrackerPayload(rows, mapping, dataType);
     } else if (ext === '.xlsx' || ext === '.xls') {
       rows = await excelToJson(req.file.buffer);
+      rows = await resolveOrgUnitNamesToIds(req, rows);
       payload = buildTrackerPayload(rows, mapping, dataType);
     } else {
       return res.status(400).json({ error: 'Unsupported file format' });

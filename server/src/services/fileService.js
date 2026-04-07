@@ -108,7 +108,7 @@ function looksLikeTemplateKey(value) {
 }
 
 function detectHeaderRowIndex(ws) {
-  const maxRows = Math.min(ws.rowCount || 1, 8);
+  const maxRows = Math.min(ws.rowCount || 1, 20);
   let best = { row: 1, score: 0 };
 
   for (let rowNumber = 1; rowNumber <= maxRows; rowNumber++) {
@@ -170,6 +170,7 @@ function buildOptionListRanges(wb, columns) {
       uniqueOptions.push(value);
     }
     if (uniqueOptions.length === 0) continue;
+    uniqueOptions.sort((a, b) => a.localeCompare(b));
 
     wsLists.getCell(1, listCol).value = String(col.label || col.key || `list_${listCol}`).slice(0, 100);
     uniqueOptions.forEach((value, idx) => {
@@ -261,14 +262,119 @@ function styleDataEntryCell(cell, required) {
   cell.protection = { locked: false };
 }
 
+function sampleForValueType(valueType) {
+  const type = String(valueType || 'TEXT').toUpperCase();
+  if (type === 'DATE') return 'Example: 2026-04-07';
+  if (type === 'DATETIME') return 'Example: 2026-04-07T13:30:00';
+  if (isNumericValueType(type)) return 'Example: 12.5';
+  if (isBooleanValueType(type)) return 'Example: true / false';
+  return 'Enter free text';
+}
+
+function styleTypedEntryCell(cell, { required, valueType, hasOptions, isExample }) {
+  styleDataEntryCell(cell, required);
+
+  if (isExample) {
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFE0F2FE' },
+    };
+    return;
+  }
+
+  if (hasOptions || isBooleanValueType(valueType)) {
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: required ? 'FFFEF3C7' : 'FFECFEFF' },
+    };
+    return;
+  }
+
+  if (isDateValueType(valueType)) {
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: required ? 'FFF0FDF4' : 'FFF7FEE7' },
+    };
+    return;
+  }
+
+  if (isNumericValueType(valueType)) {
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: required ? 'FFFFEDD5' : 'FFFFF7ED' },
+    };
+  }
+}
+
+function addDataEntryDashboard(ws, { statusCol, missingCol, dataStartRow, dataEndRow, dashboardCol }) {
+  const statusLetter = columnNumberToName(statusCol);
+  const missingLetter = columnNumberToName(missingCol);
+  const dashLetter = columnNumberToName(dashboardCol);
+  const dashLetterNext = columnNumberToName(dashboardCol + 1);
+
+  ws.getCell(`${dashLetter}1`).value = 'Data Entry Dashboard';
+  ws.mergeCells(`${dashLetter}1:${dashLetterNext}1`);
+  applyTemplateHeaderStyle(ws.getCell(`${dashLetter}1`), 'FFBFDBFE');
+
+  ws.getCell(`${dashLetter}2`).value = 'Rows started';
+  ws.getCell(`${dashLetterNext}2`).value = { formula: `COUNTIF(${statusLetter}${dataStartRow}:${statusLetter}${dataEndRow},"<>")`, result: 0 };
+
+  ws.getCell(`${dashLetter}3`).value = 'Rows ready';
+  ws.getCell(`${dashLetterNext}3`).value = { formula: `COUNTIF(${statusLetter}${dataStartRow}:${statusLetter}${dataEndRow},"Ready")`, result: 0 };
+
+  ws.getCell(`${dashLetter}4`).value = 'Rows with issues';
+  ws.getCell(`${dashLetterNext}4`).value = { formula: `COUNTIF(${statusLetter}${dataStartRow}:${statusLetter}${dataEndRow},"Missing required fields")`, result: 0 };
+
+  ws.getCell(`${dashLetter}5`).value = 'Missing fields count';
+  ws.getCell(`${dashLetterNext}5`).value = { formula: `COUNTIF(${missingLetter}${dataStartRow}:${missingLetter}${dataEndRow},"<>")`, result: 0 };
+
+  ws.getCell(`${dashLetter}7`).value = 'Next action';
+  ws.getCell(`${dashLetterNext}7`).value = {
+    formula: `IF(${dashLetterNext}4>0,"Fix red rows in Row Status before import","Sheet looks ready for import")`,
+    result: '',
+  };
+
+  for (let r = 2; r <= 7; r++) {
+    ws.getCell(`${dashLetter}${r}`).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFF8FAFC' },
+    };
+    ws.getCell(`${dashLetterNext}${r}`).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFF8FAFC' },
+    };
+    ws.getCell(`${dashLetter}${r}`).border = {
+      top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+      left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+      bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+      right: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+    };
+    ws.getCell(`${dashLetterNext}${r}`).border = {
+      top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+      left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+      bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+      right: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+    };
+  }
+
+  ws.getColumn(dashboardCol).width = 24;
+  ws.getColumn(dashboardCol + 1).width = 32;
+}
+
 function buildHorizontalValidationFormula(rowNumber, firstDataCol, lastDataCol, requiredCols = []) {
   const dataRange = `${columnNumberToName(firstDataCol)}${rowNumber}:${columnNumberToName(lastDataCol)}${rowNumber}`;
   if (!requiredCols.length) {
-    return `IF(COUNTA(${dataRange})=0,"",IF(COUNTA(${dataRange})>0,"OK",""))`;
+    return `IF(COUNTA(${dataRange})=0,"",IF(COUNTA(${dataRange})>0,"Ready",""))`;
   }
 
   const requiredRefs = requiredCols.map((col) => `${columnNumberToName(col)}${rowNumber}`).join(',');
-  return `IF(COUNTA(${dataRange})=0,"",IF(COUNTA(${requiredRefs})=${requiredCols.length},"OK","Missing required fields"))`;
+  return `IF(COUNTA(${dataRange})=0,"",IF(COUNTA(${requiredRefs})=${requiredCols.length},"Ready","Missing required fields"))`;
 }
 
 function addValidationConditionalFormatting(ws, validationCol, dataStartRow, dataEndRow) {
@@ -280,7 +386,7 @@ function addValidationConditionalFormatting(ws, validationCol, dataStartRow, dat
     rules: [
       {
         type: 'expression',
-        formulae: [`${colLetter}${dataStartRow}="OK"`],
+        formulae: [`${colLetter}${dataStartRow}="Ready"`],
         style: {
           fill: {
             type: 'pattern',
@@ -306,6 +412,61 @@ function addValidationConditionalFormatting(ws, validationCol, dataStartRow, dat
       },
     ],
   });
+}
+
+function shouldHideTemplateKey(key, programMeta) {
+  if (!programMeta?.id) return false;
+  return key === 'program' || key === 'programStage';
+}
+
+function buildVerticalValidationFormula(rowNumber) {
+  return `IF(COUNTA(A${rowNumber}:F${rowNumber})=0,"",IF(RIGHT(C${rowNumber},2)=" *",IF(E${rowNumber}="","Missing required fields","Ready"),IF(E${rowNumber}="","","Ready")))`;
+}
+
+function buildVerticalMissingRequiredFormula(rowNumber) {
+  return `IF(COUNTA(A${rowNumber}:G${rowNumber})=0,"",IF(RIGHT(C${rowNumber},2)=" *",IF(E${rowNumber}="",B${rowNumber},""),""))`;
+}
+
+function buildHorizontalMissingRequiredFormula(rowNumber, columns, statusCol) {
+  const missingChecks = [];
+  for (let i = 0; i < columns.length; i++) {
+    const col = columns[i];
+    if (!col.required) continue;
+    const letter = columnNumberToName(i + 1);
+    const label = String(col.label || col.key || `Field ${i + 1}`).replace(/"/g, "''");
+    missingChecks.push(`IF(${letter}${rowNumber}="","${label}, ","")`);
+  }
+
+  if (missingChecks.length === 0) {
+    return '""';
+  }
+
+  const statusRef = `${columnNumberToName(statusCol)}${rowNumber}`;
+  return `IF(${statusRef}<>"Missing required fields","",TEXTJOIN("",TRUE,${missingChecks.join(',')}))`;
+}
+
+function reorderColumnsForEntry(columns) {
+  const groups = new Map();
+  const order = [];
+
+  for (const column of columns) {
+    const section = column.sectionName || 'Section';
+    if (!groups.has(section)) {
+      groups.set(section, []);
+      order.push(section);
+    }
+    groups.get(section).push(column);
+  }
+
+  const ordered = [];
+  for (const section of order) {
+    const list = groups.get(section) || [];
+    const required = list.filter((col) => col.required);
+    const optional = list.filter((col) => !col.required);
+    ordered.push(...required, ...optional);
+  }
+
+  return ordered;
 }
 
 async function buildTemplateWorkbook({
@@ -334,7 +495,15 @@ async function buildTemplateWorkbook({
   }
 
   const fallbackColumns = rows[0] ? Object.keys(rows[0]).map((key) => ({ key, label: key, valueType: 'TEXT', required: false, sectionName: 'Template Fields' })) : [];
-  const columns = flatQuestions.length > 0 ? flatQuestions : fallbackColumns;
+  const columns = reorderColumnsForEntry((flatQuestions.length > 0 ? flatQuestions : fallbackColumns).map((column) => {
+    if (column.key !== 'orgUnit') return column;
+    const scopedOrgUnits = (templateSettings.orgUnitNames || []).filter(Boolean);
+    if (scopedOrgUnits.length === 0) return column;
+    return {
+      ...column,
+      options: scopedOrgUnits,
+    };
+  }));
   const optionRanges = buildOptionListRanges(wb, columns);
 
   const layout = templateSettings.layout === 'vertical' ? 'vertical' : 'horizontal';
@@ -350,13 +519,15 @@ async function buildTemplateWorkbook({
   wsStart.addRow({ step: '1', instruction: 'Go to the Data sheet and fill only the shaded input cells. Required fields are highlighted in pale yellow.' });
   wsStart.addRow({ step: '2', instruction: 'Do not edit header rows, hidden key rows, or reference sheets.' });
   wsStart.addRow({ step: '3', instruction: 'Dates should be entered as YYYY-MM-DD. Dropdown fields have limited allowed values.' });
-  wsStart.addRow({ step: '4', instruction: 'Review the Validation Notes column in the Data sheet. Rows marked OK are ready to import.' });
+  wsStart.addRow({ step: '4', instruction: 'Review the Row Status column in the Data sheet. Rows marked Ready are good to import.' });
   wsStart.addRow({ step: '5', instruction: 'After filling rows, upload this file from the Import page.' });
-  wsStart.addRow({ step: 'Legend', instruction: 'Validation Notes colors: green = ready to import, red = missing required fields.' });
+  wsStart.addRow({ step: 'Legend', instruction: 'Row Status colors: green = ready to import, red = missing required fields.' });
   wsStart.addRow({ step: 'Template Type', instruction: dataType });
   wsStart.addRow({ step: 'Program', instruction: programMeta?.displayName || 'Not selected' });
   wsStart.addRow({ step: 'Org Unit Scope', instruction: templateSettings.orgUnitScope || 'all' });
+  wsStart.addRow({ step: 'Selected Org Units', instruction: (templateSettings.orgUnitNames || templateSettings.orgUnitIds || []).join(', ') || 'All accessible units' });
   wsStart.addRow({ step: 'Language', instruction: templateSettings.language || 'en' });
+  wsStart.addRow({ step: 'Layout', instruction: layout });
 
   if (columns.length > 0) {
     if (layout === 'vertical') {
@@ -366,9 +537,11 @@ async function buildTemplateWorkbook({
         { header: 'Key', key: 'key', width: 36 },
         { header: 'Value Type', key: 'valueType', width: 18 },
         { header: 'Value', key: 'value', width: 28 },
+        { header: 'Row Status', key: 'validation', width: 28 },
+        { header: 'Missing Required', key: 'missingRequired', width: 36 },
       ];
 
-      ['A1', 'B1', 'C1', 'D1', 'E1'].forEach((address) => {
+      ['A1', 'B1', 'C1', 'D1', 'E1', 'F1', 'G1'].forEach((address) => {
         applyTemplateHeaderStyle(wsData.getCell(address), 'FF93C5FD');
       });
 
@@ -380,32 +553,89 @@ async function buildTemplateWorkbook({
           key: `${column.key}${column.required ? ' *' : ''}`,
           valueType: column.valueType || 'TEXT',
           value: firstRow[column.key] ?? '',
+          validation: '',
+          missingRequired: '',
         });
       }
 
       for (let rowNumber = 2; rowNumber <= wsData.rowCount; rowNumber++) {
         const valueCell = wsData.getCell(rowNumber, 5);
         const required = String(wsData.getCell(rowNumber, 3).value || '').endsWith(' *');
-        styleDataEntryCell(valueCell, required);
-
         const valueType = wsData.getCell(rowNumber, 4).value;
         const keyRaw = String(wsData.getCell(rowNumber, 3).value || '');
         const key = keyRaw.endsWith(' *') ? keyRaw.slice(0, -2) : keyRaw;
+        styleTypedEntryCell(valueCell, {
+          required,
+          valueType,
+          hasOptions: Boolean(optionRanges[key]),
+          isExample: false,
+        });
+
         applyDataValidationForColumn(wsData, 5, valueType, rowNumber, rowNumber, optionRanges[key] || null);
+
+        const checkCell = wsData.getCell(rowNumber, 6);
+        checkCell.value = {
+          formula: buildVerticalValidationFormula(rowNumber),
+          result: '',
+        };
+        checkCell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FFEDE9FE' },
+        };
+        checkCell.border = {
+          top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          right: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+        };
+        checkCell.font = { color: { argb: 'FF4C1D95' } };
+        checkCell.protection = { locked: true };
+
+        const missingCell = wsData.getCell(rowNumber, 7);
+        missingCell.value = {
+          formula: buildVerticalMissingRequiredFormula(rowNumber),
+          result: '',
+        };
+        missingCell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FFFFF1F2' },
+        };
+        missingCell.border = {
+          top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          right: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+        };
+        missingCell.font = { color: { argb: 'FF991B1B' } };
+        missingCell.protection = { locked: true };
+
+        if (shouldHideTemplateKey(key, programMeta)) {
+          wsData.getRow(rowNumber).hidden = true;
+        }
       }
 
       wsData.getColumn(3).hidden = true;
+      addValidationConditionalFormatting(wsData, 6, 2, wsData.rowCount);
+      addDataEntryDashboard(wsData, {
+        statusCol: 6,
+        missingCol: 7,
+        dataStartRow: 2,
+        dataEndRow: wsData.rowCount,
+        dashboardCol: 9,
+      });
 
-      wsData.views = [{ state: 'frozen', ySplit: 1 }];
+      wsData.views = [{ state: 'frozen', ySplit: 1, xSplit: 2 }];
     } else {
-      const dataStartCol = 2;
+      const dataStartCol = 1;
       const requiredColIndexes = [];
 
       let col = dataStartCol;
-      while (col <= columns.length + 1) {
+      while (col <= columns.length) {
         const sectionName = columns[col - dataStartCol].sectionName || 'Section';
         let end = col;
-        while (end <= columns.length + 1 && (columns[end - dataStartCol].sectionName || 'Section') === sectionName) {
+        while (end <= columns.length && (columns[end - dataStartCol].sectionName || 'Section') === sectionName) {
           end += 1;
         }
         wsData.mergeCells(1, col, 1, end - 1);
@@ -422,9 +652,7 @@ async function buildTemplateWorkbook({
         const qCell = wsData.getCell(2, c);
         qCell.value = column.label;
         applyTemplateHeaderStyle(qCell, column.required ? 'FFFCD34D' : 'FF60A5FA');
-        qCell.note = column.required
-          ? 'Required field. Please provide a value before import.'
-          : 'Optional field.';
+        qCell.note = `${column.required ? 'Required field. ' : 'Optional field. '}${sampleForValueType(column.valueType)}${optionRanges[column.key] ? ' Use the dropdown list.' : ''}`;
 
         const keyCell = wsData.getCell(3, c);
         keyCell.value = `${column.key}${column.required ? ' *' : ''}`;
@@ -435,15 +663,23 @@ async function buildTemplateWorkbook({
         applyTemplateHeaderStyle(typeCell, 'FFE2E8F0');
 
         wsData.getColumn(c).width = Math.max(18, Math.min(44, Math.ceil((column.label || '').length * 0.9)));
+        if (shouldHideTemplateKey(column.key, programMeta)) {
+          wsData.getColumn(c).hidden = true;
+        }
       });
 
-      const validationCol = 1;
+      const validationCol = columns.length + 1;
+      const missingCol = columns.length + 2;
       const validationSectionCell = wsData.getCell(1, validationCol);
       validationSectionCell.value = 'Template Checks';
       applyTemplateHeaderStyle(validationSectionCell, 'FFC7D2FE');
 
+      const missingSectionCell = wsData.getCell(1, missingCol);
+      missingSectionCell.value = 'Template Checks';
+      applyTemplateHeaderStyle(missingSectionCell, 'FFFECACA');
+
       const validationHeaderCell = wsData.getCell(2, validationCol);
-      validationHeaderCell.value = 'Validation Notes';
+      validationHeaderCell.value = 'Row Status';
       applyTemplateHeaderStyle(validationHeaderCell, 'FFA5B4FC');
       validationHeaderCell.note = 'This column is auto-generated. Do not edit.';
 
@@ -456,10 +692,24 @@ async function buildTemplateWorkbook({
       applyTemplateHeaderStyle(validationTypeCell, 'FFE2E8F0');
       wsData.getColumn(validationCol).width = 32;
 
+      const missingHeaderCell = wsData.getCell(2, missingCol);
+      missingHeaderCell.value = 'Missing Required';
+      applyTemplateHeaderStyle(missingHeaderCell, 'FFFCA5A5');
+      missingHeaderCell.note = 'Lists which required fields are missing in this row.';
+
+      const missingKeyCell = wsData.getCell(3, missingCol);
+      missingKeyCell.value = 'missingRequiredFields';
+      applyTemplateHeaderStyle(missingKeyCell, 'FFFECACA');
+
+      const missingTypeCell = wsData.getCell(4, missingCol);
+      missingTypeCell.value = 'TEXT';
+      applyTemplateHeaderStyle(missingTypeCell, 'FFE2E8F0');
+      wsData.getColumn(missingCol).width = 44;
+
       const firstRow = rows[0] || {};
       const values = columns.map((column) => firstRow[column.key] ?? '');
-      wsData.addRow(['', ...values]);
-      wsData.addRow(['', ...columns.map(() => '')]);
+      wsData.addRow([...values, '', '']);
+      wsData.addRow([...columns.map(() => ''), '', '']);
 
       for (let rowNumber = dataStartRow; rowNumber <= dataEndRow; rowNumber++) {
         const checkCell = wsData.getCell(rowNumber, validationCol);
@@ -479,6 +729,24 @@ async function buildTemplateWorkbook({
           right: { style: 'thin', color: { argb: 'FFE2E8F0' } },
         };
         checkCell.font = { color: { argb: 'FF4C1D95' } };
+
+        const missingCell = wsData.getCell(rowNumber, missingCol);
+        missingCell.value = {
+          formula: buildHorizontalMissingRequiredFormula(rowNumber, columns, validationCol),
+          result: '',
+        };
+        missingCell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FFFFF1F2' },
+        };
+        missingCell.border = {
+          top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          right: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+        };
+        missingCell.font = { color: { argb: 'FF991B1B' } };
       }
 
       addValidationConditionalFormatting(wsData, validationCol, dataStartRow, dataEndRow);
@@ -486,9 +754,44 @@ async function buildTemplateWorkbook({
       for (let rowNumber = dataStartRow; rowNumber <= dataEndRow; rowNumber++) {
         columns.forEach((column, index) => {
           const c = index + dataStartCol;
-          styleDataEntryCell(wsData.getCell(rowNumber, c), column.required);
+          styleTypedEntryCell(wsData.getCell(rowNumber, c), {
+            required: column.required,
+            valueType: column.valueType,
+            hasOptions: Boolean(optionRanges[column.key]),
+            isExample: rowNumber === dataStartRow,
+          });
         });
       }
+
+      const exampleRowFinal = wsData.getRow(dataStartRow);
+      exampleRowFinal.eachCell((cell, colNumber) => {
+        if (colNumber <= columns.length) {
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FFE0F2FE' },
+          };
+        }
+      });
+      wsData.getCell(dataStartRow, 1).note = 'Example row. Add your entries from the next row.';
+
+      const limitRow = dataEndRow + 1;
+      wsData.mergeCells(limitRow, 1, limitRow, columns.length);
+      const limitCell = wsData.getCell(limitRow, 1);
+      limitCell.value = 'Entry range ends above. Need more rows? Download a new template or extend the configured range intentionally.';
+      limitCell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFF1F5F9' },
+      };
+      limitCell.font = { color: { argb: 'FF334155' }, italic: true };
+      limitCell.border = {
+        top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+        left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+        bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+        right: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+      };
+      limitCell.protection = { locked: true };
 
       columns.forEach((column, index) => {
         applyDataValidationForColumn(
@@ -505,10 +808,21 @@ async function buildTemplateWorkbook({
       wsData.getColumn(validationCol).eachCell((cell) => {
         cell.protection = { locked: true };
       });
+      wsData.getColumn(missingCol).eachCell((cell) => {
+        cell.protection = { locked: true };
+      });
+
+      addDataEntryDashboard(wsData, {
+        statusCol: validationCol,
+        missingCol,
+        dataStartRow,
+        dataEndRow,
+        dashboardCol: missingCol + 2,
+      });
 
       // Keep technical keys for parser compatibility, but hide them from end users.
       wsData.getRow(3).hidden = true;
-      wsData.views = [{ state: 'frozen', ySplit: 4, xSplit: 1 }];
+      wsData.views = [{ state: 'frozen', ySplit: 4, xSplit: 2 }];
     }
   }
 
@@ -528,17 +842,6 @@ async function buildTemplateWorkbook({
     pivotTables: false,
   });
 
-  const wsInstructions = wb.addWorksheet('Instructions');
-  wsInstructions.columns = [{ header: 'Field', key: 'field', width: 26 }, { header: 'Value', key: 'value', width: 120 }];
-  wsInstructions.addRow({ field: 'How to use', value: 'Fill values in the Data sheet row(s). Import the completed file back through the Import page.' });
-  wsInstructions.addRow({ field: 'Template type', value: dataType });
-  wsInstructions.addRow({ field: 'Program', value: programMeta?.displayName || '' });
-  wsInstructions.addRow({ field: 'Program ID', value: programMeta?.id || '' });
-  wsInstructions.addRow({ field: 'Organisation unit scope', value: templateSettings.orgUnitScope || 'all' });
-  wsInstructions.addRow({ field: 'Selected org units', value: (templateSettings.orgUnitIds || []).join(', ') });
-  wsInstructions.addRow({ field: 'Language', value: templateSettings.language || 'en' });
-  wsInstructions.addRow({ field: 'Layout', value: layout });
-
   const wsProgram = wb.addWorksheet('Program');
   wsProgram.columns = [
     { header: 'Program ID', key: 'id', width: 22 },
@@ -553,13 +856,68 @@ async function buildTemplateWorkbook({
     tet: programMeta?.trackedEntityType?.displayName || '',
   });
 
+  const wsRules = wb.addWorksheet('Program Rules');
+  wsRules.columns = [
+    { header: 'Type', key: 'type', width: 18 },
+    { header: 'Rule Name', key: 'name', width: 34 },
+    { header: 'When this applies', key: 'when', width: 56 },
+    { header: 'What user should do', key: 'action', width: 56 },
+    { header: 'Technical details', key: 'details', width: 70 },
+  ];
+
+  const variables = programMeta?.programRuleVariables || [];
+  const rules = programMeta?.programRules || [];
+
+  if (variables.length === 0 && rules.length === 0) {
+    wsRules.addRow({
+      type: 'Info',
+      name: 'No program rules',
+      when: 'No explicit program rules/variables were returned by DHIS2 for this program.',
+      action: 'Follow required fields, dropdowns, and row status guidance in the Data sheet.',
+      details: '-',
+    });
+  } else {
+    for (const variable of variables) {
+      const source = [
+        variable.programRuleVariableSourceType,
+        variable.dataElement?.displayName ? `DE: ${variable.dataElement.displayName}` : null,
+        variable.trackedEntityAttribute?.displayName ? `Attr: ${variable.trackedEntityAttribute.displayName}` : null,
+        variable.programStage?.displayName ? `Stage: ${variable.programStage.displayName}` : null,
+      ].filter(Boolean).join(' | ');
+      wsRules.addRow({
+        type: 'Variable',
+        name: variable.displayName || variable.name || variable.id,
+        when: source || '-',
+        action: 'Use this field according to the source context shown.',
+        details: variable.name || '-',
+      });
+    }
+
+    for (const rule of rules) {
+      const actions = (rule.programRuleActions || []).map((action) => {
+        const actionBits = [action.programRuleActionType, action.data, action.content, action.location, action.template]
+          .filter((v) => v !== null && v !== undefined && String(v).trim() !== '')
+          .map((v) => String(v).trim());
+        return actionBits.join(' | ');
+      }).filter(Boolean);
+
+      wsRules.addRow({
+        type: 'Rule',
+        name: rule.displayName || rule.id,
+        when: rule.condition || '-',
+        action: actions.length ? 'Review actions in Technical details and ensure matching row values.' : 'No explicit action text available.',
+        details: actions.length ? actions.join(' || ') : 'No actions listed',
+      });
+    }
+  }
+
   const wsOrgUnits = wb.addWorksheet('OrgUnits');
   wsOrgUnits.columns = [
     { header: 'Org Unit ID', key: 'id', width: 22 },
     { header: 'Org Unit Name', key: 'name', width: 42 },
   ];
-  for (const id of templateSettings.orgUnitIds || []) {
-    wsOrgUnits.addRow({ id, name: '' });
+  for (const entry of templateSettings.orgUnitEntries || []) {
+    wsOrgUnits.addRow({ id: entry.id || '', name: entry.name || '' });
   }
 
   const wsElements = wb.addWorksheet('Data Elements');
@@ -569,6 +927,7 @@ async function buildTemplateWorkbook({
     { header: 'Key', key: 'key', width: 36 },
     { header: 'Value Type', key: 'type', width: 20 },
     { header: 'Required', key: 'required', width: 12 },
+    { header: 'Options', key: 'options', width: 52 },
   ];
   for (const col of columns) {
     wsElements.addRow({
@@ -577,8 +936,14 @@ async function buildTemplateWorkbook({
       key: col.key,
       type: col.valueType || 'TEXT',
       required: col.required ? 'Yes' : 'No',
+      options: Array.isArray(col.options) && col.options.length ? col.options.join(', ') : '',
     });
   }
+
+  // Keep the workbook focused on one user-facing entry experience.
+  wsProgram.state = 'hidden';
+  wsOrgUnits.state = 'hidden';
+  wsElements.state = 'hidden';
 
   return wb.xlsx.writeBuffer();
 }
@@ -619,7 +984,7 @@ async function excelToJson(buffer) {
       const keyRaw = String(keyCell).trim();
       if (!keyRaw) continue;
       const key = keyRaw.endsWith(' *') ? keyRaw.slice(0, -2) : keyRaw;
-      if (!key || key === 'validationNotes') continue;
+      if (!key || key === 'validationNotes' || key === 'missingRequiredFields') continue;
       rowObj[key] = valueCell !== null && valueCell !== undefined ? String(valueCell) : '';
     }
     return Object.keys(rowObj).length > 0 ? [rowObj] : [];
@@ -633,7 +998,7 @@ async function excelToJson(buffer) {
       headers = values.map((v, i) => {
         const raw = v !== null && v !== undefined ? String(v).trim() : '';
         const normalized = raw.endsWith(' *') ? raw.slice(0, -2) : (raw || `col${i + 1}`);
-        if (normalized === 'validationNotes') return null;
+        if (normalized === 'validationNotes' || normalized === 'missingRequiredFields') return null;
         return normalized;
       });
     } else if (rowNumber > headerRowIndex) {
