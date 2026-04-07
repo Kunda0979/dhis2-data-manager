@@ -94,6 +94,7 @@ export default function SettingsPage() {
                 { value: 'json', label: 'JSON' },
                 { value: 'csv', label: 'CSV' },
                 { value: 'xlsx', label: 'Excel (.xlsx)' },
+                { value: 'pdf', label: 'PDF' },
               ]}
               style={{ width: 180 }}
             />

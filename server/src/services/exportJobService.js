@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 const { fetchEvents, fetchEnrollments, fetchTrackedEntities } = require('./exportService');
-const { jsonToCsv, jsonToExcel } = require('./fileService');
+const { jsonToCsv, jsonToExcel, jsonToPdf } = require('./fileService');
 
 const jobs = new Map();
 
@@ -91,6 +91,13 @@ function createExportJob({ sessionId, credentials, dataType, format, params = {}
           contentType: 'text/csv',
           filename: buildFilename(dataType, 'csv'),
           body: Buffer.from(csv, 'utf8'),
+        };
+      } else if (format === 'pdf') {
+        const buffer = await jsonToPdf(flattenArray(data), { title: `${dataType} export` });
+        job.output = {
+          contentType: 'application/pdf',
+          filename: buildFilename(dataType, 'pdf'),
+          body: Buffer.from(buffer),
         };
       } else {
         const buffer = await jsonToExcel(flattenArray(data));

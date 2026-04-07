@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Card, Steps, Button, Space, Divider, App, Progress, Alert } from 'antd'
+import { Card, Steps, Button, Space, Divider, App, Progress, Alert, Typography } from 'antd'
 import { DownloadOutlined } from '@ant-design/icons'
 import ProgramSelector from './ProgramSelector.jsx'
 import OrgUnitSelector from './OrgUnitSelector.jsx'
@@ -9,20 +9,53 @@ import ExportResults from './ExportResults.jsx'
 import { useDhis2Export } from '../../hooks/useDhis2Export.js'
 import { useDhis2Metadata } from '../../hooks/useDhis2Metadata.js'
 
+const EXPORT_PREFS_KEY = 'dhis2_export_prefs'
+const SETTINGS_KEY = 'dhis2_settings'
+
+function loadExportPrefs() {
+  let defaultFormat = 'json'
+  try {
+    const settings = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}')
+    if (settings?.defaultFormat) defaultFormat = settings.defaultFormat
+  } catch {
+    defaultFormat = 'json'
+  }
+
+  try {
+    const parsed = JSON.parse(localStorage.getItem(EXPORT_PREFS_KEY) || '{}')
+    return {
+      dataType: parsed.dataType || 'events',
+      format: parsed.format || defaultFormat,
+      asyncMode: Boolean(parsed.asyncMode),
+      ouMode: parsed.ouMode || 'DESCENDANTS',
+      status: parsed.status,
+    }
+  } catch {
+    return {
+      dataType: 'events',
+      format: defaultFormat,
+      asyncMode: false,
+      ouMode: 'DESCENDANTS',
+      status: undefined,
+    }
+  }
+}
+
 export default function ExportDashboard() {
+  const savedPrefs = loadExportPrefs()
   const { message } = App.useApp()
   const [currentStep, setCurrentStep] = useState(0)
   const [filters, setFilters] = useState({
     program: undefined,
     orgUnit: undefined,
-    ouMode: 'DESCENDANTS',
+    ouMode: savedPrefs.ouMode,
     startDate: undefined,
     endDate: undefined,
-    status: undefined,
+    status: savedPrefs.status,
   })
-  const [dataType, setDataType] = useState('events')
-  const [format, setFormat] = useState('json')
-  const [asyncMode, setAsyncMode] = useState(false)
+  const [dataType, setDataType] = useState(savedPrefs.dataType)
+  const [format, setFormat] = useState(savedPrefs.format)
+  const [asyncMode, setAsyncMode] = useState(savedPrefs.asyncMode)
   const [activeJobId, setActiveJobId] = useState(null)
 
   const {
@@ -45,9 +78,33 @@ export default function ExportDashboard() {
     fetchOrgUnits()
   }, [])
 
+  useEffect(() => {
+    localStorage.setItem(EXPORT_PREFS_KEY, JSON.stringify({
+      dataType,
+      format,
+      asyncMode,
+      ouMode: filters.ouMode,
+      status: filters.status,
+    }))
+  }, [asyncMode, dataType, filters.ouMode, filters.status, format])
+
+  const hasValidDateRange = !filters.startDate || !filters.endDate || filters.startDate <= filters.endDate
+  const canFetch = Boolean(filters.orgUnit) && hasValidDateRange
+
+  const readinessItems = [
+    { done: Boolean(filters.orgUnit), label: 'Organisation unit selected' },
+    { done: hasValidDateRange, label: 'Date range is valid' },
+    { done: Boolean(dataType), label: 'Data type selected' },
+    { done: Boolean(format), label: 'Export format selected' },
+  ]
+
   const handleExport = async () => {
     if (!filters.orgUnit) {
       message.warning('Please select an organisation unit')
+      return
+    }
+    if (!hasValidDateRange) {
+      message.warning('Please use a valid date range (start date must be before end date)')
       return
     }
     const params = {}
@@ -115,13 +172,15 @@ export default function ExportDashboard() {
 
   const steps = [
     { title: 'Configure', description: 'Set filters' },
-    { title: 'Preview', description: 'Review data' },
+    { title: 'Review', description: 'Preview data' },
+    { title: 'Download', description: 'Export file' },
   ]
+  const readyToDownload = asyncMode ? jobStatus?.status === 'completed' : data.length > 0
 
   return (
     <div>
       <Card>
-        <Steps current={currentStep} items={steps} style={{ marginBottom: 24 }} size="small" />
+        <Steps current={currentStep === 0 ? 0 : (readyToDownload ? 2 : 1)} items={steps} style={{ marginBottom: 24 }} size="small" />
 
         {currentStep === 0 && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -154,6 +213,21 @@ export default function ExportDashboard() {
                 onFormatChange={setFormat}
                 onStatusChange={(v) => setFilters((f) => ({ ...f, status: v }))}
                 onAsyncModeChange={setAsyncMode}
+              />
+              <Alert
+                type={canFetch ? 'success' : 'warning'}
+                showIcon
+                style={{ marginBottom: 12 }}
+                message={canFetch ? 'Ready to fetch data' : 'Checklist before fetching'}
+                description={(
+                  <Space direction="vertical" size={2}>
+                    {readinessItems.map((item) => (
+                      <Typography.Text key={item.label} type={item.done ? 'success' : undefined}>
+                        {item.done ? 'Done' : 'Pending'}: {item.label}
+                      </Typography.Text>
+                    ))}
+                  </Space>
+                )}
               />
             </div>
           </div>
@@ -191,7 +265,7 @@ export default function ExportDashboard() {
         <Divider />
         <Space>
           {currentStep === 0 ? (
-            <Button type="primary" onClick={handleExport} loading={loading} icon={<DownloadOutlined />}>
+            <Button type="primary" onClick={handleExport} loading={loading} icon={<DownloadOutlined />} disabled={!canFetch}>
               Fetch Data
             </Button>
           ) : (

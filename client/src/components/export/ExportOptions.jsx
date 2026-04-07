@@ -11,6 +11,7 @@ const FORMATS = [
   { value: 'json', label: 'JSON' },
   { value: 'csv', label: 'CSV' },
   { value: 'xlsx', label: 'Excel (.xlsx)' },
+  { value: 'pdf', label: 'PDF' },
 ]
 
 const STATUS_OPTIONS = [

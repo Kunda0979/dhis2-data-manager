@@ -1,7 +1,7 @@
 const express = require('express');
 const { requireDhis2Credentials } = require('../middleware/auth');
 const { fetchTrackedEntities, fetchEnrollments, fetchEvents } = require('../services/exportService');
-const { jsonToCsv, jsonToExcel } = require('../services/fileService');
+const { jsonToCsv, jsonToExcel, jsonToPdf } = require('../services/fileService');
 const { createExportJob, getExportJob, cancelExportJob } = require('../services/exportJobService');
 const { addHistoryEntry, updateHistoryByJobId } = require('../services/historyService');
 
@@ -95,7 +95,7 @@ router.get('/events', async (req, res, next) => {
 router.post('/jobs', async (req, res) => {
   const { dataType = 'events', format = 'json', params = {} } = req.body || {};
   const allowedTypes = new Set(['events', 'enrollments', 'trackedEntities']);
-  const allowedFormats = new Set(['json', 'csv', 'xlsx']);
+  const allowedFormats = new Set(['json', 'csv', 'xlsx', 'pdf']);
 
   if (!allowedTypes.has(dataType)) {
     return res.status(400).json({ error: 'Invalid dataType for export job' });
@@ -220,6 +220,12 @@ async function sendData(res, data, format, filename) {
     const buffer = await jsonToExcel(flat);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}-${timestamp}.xlsx"`);
+    res.send(buffer);
+  } else if (format === 'pdf') {
+    const flat = flattenArray(data);
+    const buffer = await jsonToPdf(flat, { title: `${filename} export` });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}-${timestamp}.pdf"`);
     res.send(buffer);
   } else {
     res.json({ data, count: data.length });

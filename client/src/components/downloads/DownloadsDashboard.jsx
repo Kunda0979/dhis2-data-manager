@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Alert, App, Button, Card, Checkbox, DatePicker, Form, Input, InputNumber, Radio, Select, Space, Typography } from 'antd'
+import { Alert, App, Button, Card, Checkbox, DatePicker, Form, Input, InputNumber, Radio, Select, Space, Steps, Typography } from 'antd'
 import { DownloadOutlined } from '@ant-design/icons'
 import { useDhis2Import } from '../../hooks/useDhis2Import.js'
 import { useDhis2Metadata } from '../../hooks/useDhis2Metadata.js'
@@ -21,19 +21,45 @@ const LAYOUT_OPTIONS = [
   { value: 'vertical', label: 'Vertical (questions as rows)' },
 ]
 
+const TEMPLATE_PREFS_KEY = 'dhis2_template_prefs'
+
+function loadTemplatePrefs() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(TEMPLATE_PREFS_KEY) || '{}')
+    return {
+      dataType: parsed.dataType || 'events',
+      prepopulate: Boolean(parsed.prepopulate),
+      orgUnitScope: parsed.orgUnitScope || 'all',
+      language: parsed.language || 'en',
+      layout: parsed.layout || 'horizontal',
+      format: parsed.format || 'csv',
+    }
+  } catch {
+    return {
+      dataType: 'events',
+      prepopulate: false,
+      orgUnitScope: 'all',
+      language: 'en',
+      layout: 'horizontal',
+      format: 'csv',
+    }
+  }
+}
+
 export default function DownloadsDashboard() {
+  const savedPrefs = loadTemplatePrefs()
   const { message } = App.useApp()
   const { programs, orgUnits, fetchPrograms, fetchOrgUnits, loading: metadataLoading } = useDhis2Metadata()
   const { downloadTemplate, previewTemplate } = useDhis2Import()
   const [programId, setProgramId] = useState()
-  const [dataType, setDataType] = useState('events')
+  const [dataType, setDataType] = useState(savedPrefs.dataType)
   const [programStageId, setProgramStageId] = useState()
-  const [prepopulate, setPrepopulate] = useState(false)
-  const [orgUnitScope, setOrgUnitScope] = useState('all')
+  const [prepopulate, setPrepopulate] = useState(savedPrefs.prepopulate)
+  const [orgUnitScope, setOrgUnitScope] = useState(savedPrefs.orgUnitScope)
   const [selectedOrgUnits, setSelectedOrgUnits] = useState([])
-  const [language, setLanguage] = useState('en')
-  const [layout, setLayout] = useState('horizontal')
-  const [format, setFormat] = useState('csv')
+  const [language, setLanguage] = useState(savedPrefs.language)
+  const [layout, setLayout] = useState(savedPrefs.layout)
+  const [format, setFormat] = useState(savedPrefs.format)
   const [downloading, setDownloading] = useState(false)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState(null)
@@ -113,6 +139,29 @@ export default function DownloadsDashboard() {
   const downloadDisabled = !programId
     || (requiresStage && !programStageId)
     || (orgUnitScope === 'specific' && selectedOrgUnits.length === 0)
+
+  useEffect(() => {
+    localStorage.setItem(TEMPLATE_PREFS_KEY, JSON.stringify({
+      dataType,
+      prepopulate,
+      orgUnitScope,
+      language,
+      layout,
+      format,
+    }))
+  }, [dataType, prepopulate, orgUnitScope, language, layout, format])
+
+  const readinessItems = useMemo(() => ([
+    { done: Boolean(programId), label: 'Program selected' },
+    { done: !requiresStage || Boolean(programStageId), label: 'Program stage selected (for event templates)' },
+    { done: orgUnitScope !== 'specific' || selectedOrgUnits.length > 0, label: 'Organisation unit scope is valid' },
+  ]), [orgUnitScope, programId, programStageId, requiresStage, selectedOrgUnits.length])
+
+  const wizardStep = !programId
+    ? 0
+    : (!requiresStage || programStageId)
+      ? ((orgUnitScope !== 'specific' || selectedOrgUnits.length > 0) ? 3 : 2)
+      : 1
 
   useEffect(() => {
     let cancelled = false
@@ -229,6 +278,16 @@ export default function DownloadsDashboard() {
           <Typography.Text type="secondary">
             Choose a DHIS2 program, download an empty file or a pre-populated sample, complete it offline, then upload it again from the Import section.
           </Typography.Text>
+          <Steps
+            size="small"
+            current={wizardStep}
+            items={[
+              { title: 'Program' },
+              { title: 'Template Type' },
+              { title: 'Scope' },
+              { title: 'Download' },
+            ]}
+          />
         </Space>
       </Card>
 
@@ -330,10 +389,26 @@ export default function DownloadsDashboard() {
               showIcon
               message="How this works"
               description={dataType === 'events'
-                ? 'The download includes the selected program, the chosen stage, and one column per stage data element. Keep the de_* headers unchanged to import back without remapping.'
+                ? 'The spreadsheet includes plain-language questions, highlighted required fields, and a protected structure. Fill only the shaded data-entry cells in the Data sheet.'
                 : dataType === 'trackedEntities'
-                  ? 'The download includes tracked entity attribute columns using attr_* headers derived from the selected program and tracked entity type.'
-                  : 'The download includes the core enrollment columns required by the current import flow so the file can be completed and uploaded from Import.'}
+                  ? 'The template includes user-friendly attribute labels and a Start Here sheet with instructions for non-technical users.'
+                  : 'The template includes enrollment fields with required columns highlighted so the completed file can be uploaded directly from Import.'}
+              style={{ marginBottom: 16 }}
+            />
+
+            <Alert
+              type={downloadDisabled ? 'warning' : 'success'}
+              showIcon
+              message={downloadDisabled ? 'Readiness checklist' : 'Ready to download'}
+              description={(
+                <Space direction="vertical" size={2}>
+                  {readinessItems.map((item) => (
+                    <Typography.Text key={item.label} type={item.done ? 'success' : undefined}>
+                      {item.done ? 'Done' : 'Pending'}: {item.label}
+                    </Typography.Text>
+                  ))}
+                </Space>
+              )}
               style={{ marginBottom: 16 }}
             />
 

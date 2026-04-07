@@ -1,11 +1,14 @@
 import React from 'react'
-import { Typography } from 'antd'
+import { Button, Card, Space, Typography } from 'antd'
+import { useNavigate } from 'react-router-dom'
 import { UploadOutlined } from '@ant-design/icons'
 import ImportDashboard from '../components/import/ImportDashboard.jsx'
 
 const { Title } = Typography
 
 export default function ImportPage() {
+  const navigate = useNavigate()
+
   return (
     <div>
       <div
@@ -40,6 +43,16 @@ export default function ImportPage() {
           </Typography.Text>
         </div>
       </div>
+
+      <Card size="small" style={{ marginBottom: 16 }}>
+        <Space wrap>
+          <Typography.Text strong>Quick Actions:</Typography.Text>
+          <Button onClick={() => navigate('/downloads')}>Download Template</Button>
+          <Button onClick={() => navigate('/export')}>Export Reference Data</Button>
+          <Button onClick={() => navigate('/history')}>View Job History</Button>
+        </Space>
+      </Card>
+
       <ImportDashboard />
     </div>
   )

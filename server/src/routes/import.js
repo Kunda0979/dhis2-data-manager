@@ -44,7 +44,20 @@ function buildTemplateFieldKey(prefix, id, displayName) {
 }
 
 function makeQuestion(key, label, valueType = 'TEXT', required = false) {
-  return { key, label, valueType, required: Boolean(required) };
+  return { key, label, valueType, required: Boolean(required), options: [] };
+}
+
+function extractOptionValues(entity) {
+  const opts = entity?.optionSet?.options || [];
+  const seen = new Set();
+  const values = [];
+  for (const opt of opts) {
+    const value = String(opt?.displayName || opt?.name || opt?.code || '').trim();
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    values.push(value);
+  }
+  return values;
 }
 
 function buildProgramTemplateLayout(programMeta, dataType, programStageId) {
@@ -69,9 +82,10 @@ function buildProgramTemplateLayout(programMeta, dataType, programStageId) {
     sections.push({
       id: 'te-attributes',
       name: 'Attributes',
-      questions: attrs.map((attr) =>
-        makeQuestion(buildTemplateFieldKey('attr', attr.id, attr.displayName), attr.displayName || attr.id, attr.valueType || 'TEXT', false)
-      ),
+      questions: attrs.map((attr) => ({
+        ...makeQuestion(buildTemplateFieldKey('attr', attr.id, attr.displayName), attr.displayName || attr.id, attr.valueType || 'TEXT', false),
+        options: extractOptionValues(attr),
+      })),
     });
 
     return sections;
@@ -128,9 +142,10 @@ function buildProgramTemplateLayout(programMeta, dataType, programStageId) {
   sections.push({ id: 'event-core', name: 'Event Details', questions: coreQuestions });
 
   const sectionElements = (selectedStage.programStageSections || []).map((section) => {
-    const questions = (section.dataElements || []).map((de) =>
-      makeQuestion(buildTemplateFieldKey('de', de.id, de.formName || de.displayName), de.formName || de.displayName || de.id, de.valueType || 'TEXT', false)
-    );
+    const questions = (section.dataElements || []).map((de) => ({
+      ...makeQuestion(buildTemplateFieldKey('de', de.id, de.formName || de.displayName), de.formName || de.displayName || de.id, de.valueType || 'TEXT', false),
+      options: extractOptionValues(de),
+    }));
     return {
       id: section.id,
       name: section.displayName || 'Section',
@@ -157,12 +172,15 @@ function buildProgramTemplateLayout(programMeta, dataType, programStageId) {
     questions: [...stageElements]
       .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))
       .map((item) =>
-        makeQuestion(
+        ({
+          ...makeQuestion(
           buildTemplateFieldKey('de', item.dataElement.id, item.dataElement.formName || item.dataElement.displayName),
           item.dataElement.formName || item.dataElement.displayName || item.dataElement.id,
           item.dataElement.valueType || 'TEXT',
           item.compulsory,
-        )
+          ),
+          options: extractOptionValues(item.dataElement),
+        })
       ),
   });
 
@@ -317,9 +335,9 @@ async function fetchProgramTemplateMetadata(req, programId) {
         'id',
         'displayName',
         'programType',
-        'trackedEntityType[id,displayName,trackedEntityTypeAttributes[trackedEntityAttribute[id,displayName,valueType]]]',
-        'programTrackedEntityAttributes[trackedEntityAttribute[id,displayName,valueType],mandatory]',
-        'programStages[id,displayName,sortOrder,programStageDataElements[dataElement[id,displayName,formName,valueType],sortOrder,compulsory],programStageSections[id,displayName,sortOrder,dataElements[id,displayName,formName,valueType]]]',
+        'trackedEntityType[id,displayName,trackedEntityTypeAttributes[trackedEntityAttribute[id,displayName,valueType,optionSet[id,options[id,code,name,displayName]]]]]',
+        'programTrackedEntityAttributes[trackedEntityAttribute[id,displayName,valueType,optionSet[id,options[id,code,name,displayName]]],mandatory]',
+        'programStages[id,displayName,sortOrder,programStageDataElements[dataElement[id,displayName,formName,valueType,optionSet[id,options[id,code,name,displayName]]],sortOrder,compulsory],programStageSections[id,displayName,sortOrder,dataElements[id,displayName,formName,valueType,optionSet[id,options[id,code,name,displayName]]]]]',
       ].join(','),
     },
   });
