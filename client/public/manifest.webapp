@@ -1,0 +1,27 @@
+{
+  "name": "DHIS2 Data Manager",
+  "short_name": "DataManager",
+  "description": "Export and import DHIS2 tracker/event data with mapping, validation, and job history.",
+  "version": "1.0.0",
+  "launch_path": "index.html",
+  "appType": "APP",
+  "core_app": false,
+  "default_locale": "en",
+  "activities": {
+    "dhis": {
+      "href": ".."
+    }
+  },
+  "icons": {
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "developer": {
+    "name": "Kunda0979",
+    "email": "",
+    "url": "https://github.com/Kunda0979/dhis2-data-manager"
+  },
+  "display": "standalone",
+  "theme_color": "#0369a1",
+  "background_color": "#f0f4f8"
+}

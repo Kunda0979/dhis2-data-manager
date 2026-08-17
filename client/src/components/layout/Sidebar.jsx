@@ -101,7 +101,7 @@ export default function Sidebar() {
           fontSize: 11,
         }}
       >
-        DHIS2 v42+ Tracker API
+        DHIS2 v42+ Tracker and Aggregate APIs
       </div>
     </div>
   )

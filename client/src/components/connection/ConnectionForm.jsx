@@ -25,7 +25,7 @@ export default function ConnectionForm() {
       style={{ background: 'linear-gradient(135deg, #0f172a 0%, #0c2340 45%, #0369a1 100%)' }}
     >
       <Card
-        bordered={false}
+        variant="borderless"
         style={{
           width: '100%',
           maxWidth: 460,
@@ -146,7 +146,7 @@ export default function ConnectionForm() {
         <Paragraph type="secondary" style={{ fontSize: 12, textAlign: 'center', marginBottom: 0 }}>
           Credentials are stored server-side in an expiring in-memory session.
           <br />
-          Supports DHIS2 v42+ with the new Tracker API.
+          Supports DHIS2 v42+ tracker and aggregate data APIs.
         </Paragraph>
       </Card>
     </div>

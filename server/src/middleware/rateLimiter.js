@@ -5,13 +5,14 @@ function parsePositiveInt(value, fallback) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function buildLimiter(windowMinutes, maxRequests, message) {
+function buildLimiter(windowMinutes, maxRequests, message, options = {}) {
   return rateLimit({
     windowMs: windowMinutes * 60 * 1000,
     limit: maxRequests,
     standardHeaders: 'draft-7',
     legacyHeaders: false,
     message: { error: message },
+    ...options,
   });
 }
 
@@ -27,7 +28,17 @@ const importLimiter = buildLimiter(
   'Too many import requests. Please try again later.',
 );
 
+const exportLimiter = buildLimiter(
+  parsePositiveInt(process.env.RATE_LIMIT_EXPORT_WINDOW_MIN, 15),
+  parsePositiveInt(process.env.RATE_LIMIT_EXPORT_MAX, 90),
+  'Too many export requests from this session. Please wait and try again.',
+  {
+    keyGenerator: (req) => req.authSession?.id || req.authToken || req.ip,
+  },
+);
+
 module.exports = {
   connectLimiter,
   importLimiter,
+  exportLimiter,
 };

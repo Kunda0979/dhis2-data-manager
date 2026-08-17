@@ -33,4 +33,5 @@ export const REQUIRED_FIELDS = {
   events: ['program', 'programStage', 'orgUnit'],
   enrollments: ['program', 'orgUnit'],
   trackedEntities: ['trackedEntityType', 'orgUnit'],
+  aggregate: ['dataElement', 'period', 'orgUnit', 'value'],
 }

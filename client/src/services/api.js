@@ -3,6 +3,9 @@ import axios from 'axios'
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || '',
   timeout: 120000,
+  // Required so the browser sends the HttpOnly session cookie (dm_sid) with
+  // every request, including cross-origin requests in the DHIS2 app context.
+  withCredentials: true,
 })
 
 // Dispatch a custom event so ConnectionContext can clear the session

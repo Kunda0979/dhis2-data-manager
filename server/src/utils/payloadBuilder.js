@@ -1,18 +1,19 @@
 const crypto = require('crypto');
 
 /**
- * Build a DHIS2 tracker payload from flat row data.
- * Supports building events, enrollments, and tracked entities.
+ * Build a DHIS2 import payload from flat row data.
+ * Supports tracker payloads plus aggregate data value sets.
  *
  * @param {Array} rows - flat data rows (from CSV/Excel)
  * @param {object} mapping - column mapping { dhis2Field: columnName }
- * @param {string} dataType - 'events' | 'enrollments' | 'trackedEntities'
+ * @param {string} dataType - 'events' | 'enrollments' | 'trackedEntities' | 'aggregate'
  */
 function buildTrackerPayload(rows, mapping, dataType) {
   const payload = {
     trackedEntities: [],
     enrollments: [],
     events: [],
+    dataValues: [],
   };
 
   for (const row of rows) {
@@ -24,6 +25,8 @@ function buildTrackerPayload(rows, mapping, dataType) {
       payload.enrollments.push(buildEnrollment(mapped));
     } else if (dataType === 'trackedEntities') {
       payload.trackedEntities.push(buildTrackedEntity(mapped));
+    } else if (dataType === 'aggregate') {
+      payload.dataValues.push(...buildAggregateDataValuesFromRow(mapped));
     }
   }
 
@@ -31,14 +34,17 @@ function buildTrackerPayload(rows, mapping, dataType) {
 }
 
 /**
- * Convert a raw tracker payload (JSON import) to the correct structure.
+ * Convert a raw JSON payload to the correct DHIS2 import structure.
  */
-function convertToTracker(rawPayload) {
-  if (rawPayload.trackedEntities || rawPayload.enrollments || rawPayload.events) {
+function convertToTracker(rawPayload, dataType = 'events') {
+  if (rawPayload.trackedEntities || rawPayload.enrollments || rawPayload.events || rawPayload.dataValues) {
     return rawPayload;
   }
-  // If it's an array, assume it's events
+  // If it's an array, use the selected type to place the rows.
   if (Array.isArray(rawPayload)) {
+    if (dataType === 'aggregate') {
+      return { dataValues: rawPayload };
+    }
     return { events: rawPayload };
   }
   return rawPayload;
@@ -146,6 +152,68 @@ function buildTrackedEntity(row) {
     orgUnit: row.orgUnit,
     attributes,
   };
+}
+
+function buildDataValue(row) {
+  return {
+    dataElement: row.dataElement,
+    period: row.period,
+    orgUnit: row.orgUnit,
+    categoryOptionCombo: row.categoryOptionCombo || row.coc || undefined,
+    attributeOptionCombo: row.attributeOptionCombo || row.aoc || undefined,
+    value: row.value,
+    comment: row.comment || undefined,
+    storedBy: row.storedBy || undefined,
+  };
+}
+
+function parseAggregateDataElementKey(key) {
+  if (typeof key !== 'string') return null;
+  const match = key.match(/^de_([A-Za-z0-9]{11})(?:__coc_([A-Za-z0-9]{11}))?(?:__.*)?$/);
+  if (!match) return null;
+
+  return {
+    dataElement: match[1],
+    categoryOptionCombo: match[2] || null,
+  };
+}
+
+function buildAggregateDataValuesFromRow(row) {
+  if (!row || typeof row !== 'object') return [];
+
+  // Backwards-compatible long format row.
+  if (String(row.dataElement || '').trim()) {
+    const legacy = buildDataValue(row);
+    if (legacy.value === undefined || legacy.value === null || String(legacy.value).trim() === '') {
+      return [];
+    }
+    return [legacy];
+  }
+
+  const values = [];
+  const period = row.period;
+  const orgUnit = row.orgUnit;
+  const attributeOptionCombo = row.attributeOptionCombo || row.aoc || undefined;
+  const fallbackCategoryOptionCombo = row.categoryOptionCombo || row.coc || undefined;
+
+  for (const [key, rawValue] of Object.entries(row)) {
+    const parsed = parseAggregateDataElementKey(key);
+    if (!parsed) continue;
+    if (rawValue === undefined || rawValue === null || String(rawValue).trim() === '') continue;
+
+    values.push({
+      dataElement: parsed.dataElement,
+      period,
+      orgUnit,
+      categoryOptionCombo: parsed.categoryOptionCombo || fallbackCategoryOptionCombo,
+      attributeOptionCombo,
+      value: rawValue,
+      comment: row.comment || undefined,
+      storedBy: row.storedBy || undefined,
+    });
+  }
+
+  return values;
 }
 
 module.exports = { buildTrackerPayload, convertToTracker };

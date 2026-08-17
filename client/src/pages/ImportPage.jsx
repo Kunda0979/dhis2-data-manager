@@ -39,7 +39,7 @@ export default function ImportPage() {
         <div>
           <Title level={5} style={{ margin: 0 }}>Import Data</Title>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            Upload and map files to import data into DHIS2
+            Upload, select model, run dry run, then import into DHIS2
           </Typography.Text>
         </div>
       </div>

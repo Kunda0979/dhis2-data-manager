@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react'
 import { useConnection } from '../contexts/ConnectionContext.jsx'
 import api from '../services/api.js'
+import { normalizeApiError } from '../utils/apiError.js'
 
 export function useDhis2Export() {
   const { getHeaders } = useConnection()
@@ -23,8 +24,7 @@ export function useDhis2Export() {
       setCount(res.data.count || items.length)
       return items
     } catch (err) {
-      const msg = err.response?.data?.message || err.message
-      setError(msg)
+      setError(normalizeApiError(err))
       return []
     } finally {
       setLoading(false)
@@ -66,8 +66,7 @@ export function useDhis2Export() {
       setJobStatus(res.data)
       return res.data
     } catch (err) {
-      const msg = err.response?.data?.message || err.response?.data?.error || err.message
-      setError(msg)
+      setError(normalizeApiError(err))
       return null
     } finally {
       setLoading(false)

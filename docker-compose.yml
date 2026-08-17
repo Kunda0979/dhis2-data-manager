@@ -5,11 +5,16 @@ services:
     build:
       context: ./server
       dockerfile: ../docker/Dockerfile.server
-    ports:
-      - "4000:4000"
     environment:
       - PORT=4000
       - NODE_ENV=production
+      # Required for DHIS2 App Management auto-connect (issue #3).
+      # Generate a Personal Access Token in DHIS2 → User Settings → PAT
+      # and set it here. The backend uses it to call /api/me on behalf of the app.
+      - DHIS2_API_TOKEN=${DHIS2_API_TOKEN}
+      # Secret for signing the HttpOnly session cookie (issue #4).
+      # Must be a long random string, e.g.: openssl rand -hex 32
+      - COOKIE_SECRET=${COOKIE_SECRET}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:4000/health"]

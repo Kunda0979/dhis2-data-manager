@@ -22,7 +22,19 @@ export default function ExportResults({ data = [], count, dataType, loading, err
   }, [data])
 
   if (error) {
-    return <Alert type="error" message="Export failed" description={error} showIcon />
+    return (
+      <Alert
+        type="error"
+        message={error?.message || 'Export failed'}
+        description={(
+          <div>
+            <div>{error?.hint || 'Review your filters and try again.'}</div>
+            {error?.status ? <Text type="secondary">Status: {error.status}</Text> : null}
+          </div>
+        )}
+        showIcon
+      />
+    )
   }
 
   if (!loading && data.length === 0) {

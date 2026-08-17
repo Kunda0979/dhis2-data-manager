@@ -1,7 +1,7 @@
 import React from 'react'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { HashRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { ConfigProvider, App as AntApp } from 'antd'
-import { ConnectionProvider } from './contexts/ConnectionContext.jsx'
+import { ConnectionProvider, useConnection } from './contexts/ConnectionContext.jsx'
 import AppLayout from './components/layout/AppLayout.jsx'
 import ConnectPage from './pages/ConnectPage.jsx'
 import DownloadsPage from './pages/DownloadsPage.jsx'
@@ -9,6 +9,16 @@ import ExportPage from './pages/ExportPage.jsx'
 import ImportPage from './pages/ImportPage.jsx'
 import HistoryPage from './pages/HistoryPage.jsx'
 import SettingsPage from './pages/SettingsPage.jsx'
+
+/**
+ * Wraps the /connect route so that in DHIS2 mode (auto-bootstrap active)
+ * it immediately redirects to /export instead of showing the credential form.
+ */
+function ConnectRoute() {
+  const { dhis2Mode } = useConnection()
+  if (dhis2Mode) return <Navigate to="/export" replace />
+  return <ConnectPage />
+}
 
 export default function App() {
   return (
@@ -38,9 +48,14 @@ export default function App() {
     >
       <AntApp>
         <ConnectionProvider>
-          <BrowserRouter>
+          <HashRouter
+            future={{
+              v7_startTransition: true,
+              v7_relativeSplatPath: true,
+            }}
+          >
             <Routes>
-              <Route path="/connect" element={<ConnectPage />} />
+              <Route path="/connect" element={<ConnectRoute />} />
               <Route path="/" element={<AppLayout />}>
                 <Route index element={<Navigate to="/export" replace />} />
                 <Route path="downloads" element={<DownloadsPage />} />
@@ -51,7 +66,7 @@ export default function App() {
               </Route>
               <Route path="*" element={<Navigate to="/connect" replace />} />
             </Routes>
-          </BrowserRouter>
+          </HashRouter>
         </ConnectionProvider>
       </AntApp>
     </ConfigProvider>

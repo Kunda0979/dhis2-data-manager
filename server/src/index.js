@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const cookieParser = require('cookie-parser');
 const errorHandler = require('./middleware/errorHandler');
 
 const connectionRouter = require('./routes/connection');
@@ -12,6 +13,7 @@ const historyRouter = require('./routes/history');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
+const HOST = process.env.HOST || '0.0.0.0';
 const isProduction = process.env.NODE_ENV === 'production';
 const allowAllOrigins = process.env.CORS_ALLOW_ALL === 'true' || !isProduction;
 
@@ -34,14 +36,21 @@ const corsOptions = {
     if (configuredOrigins.includes(origin)) return callback(null, true);
     return callback(new Error('Origin not allowed by CORS policy'));
   },
-  methods: ['GET', 'POST', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Authorization', 'Content-Type', 'x-dhis2-url', 'x-dhis2-username', 'x-dhis2-password'],
+  // Required for cross-origin cookie delivery (DHIS2 app iframe context)
+  credentials: true,
 };
 
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
 }));
 app.use(cors(corsOptions));
+
+// Cookie parser with optional signing secret
+const COOKIE_SECRET = process.env.COOKIE_SECRET || '';
+app.use(cookieParser(COOKIE_SECRET || undefined));
+
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
@@ -57,12 +66,23 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Friendly root route for manual browser testing.
+app.get('/', (req, res) => {
+  res.json({
+    service: 'DHIS2 Data Manager API',
+    status: 'ok',
+    health: '/health',
+    apiBase: '/api',
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // Global error handler (must be last)
 app.use(errorHandler);
 
 if (require.main === module) {
-  app.listen(PORT, () => {
-    console.log(`DHIS2 Data Manager server running on port ${PORT}`);
+  app.listen(PORT, HOST, () => {
+    console.log(`DHIS2 Data Manager server running on ${HOST}:${PORT}`);
   });
 }
 

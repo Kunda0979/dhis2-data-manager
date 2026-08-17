@@ -39,7 +39,7 @@ export default function ExportPage() {
         <div>
           <Title level={5} style={{ margin: 0 }}>Export Data</Title>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            Select filters and export tracker data from DHIS2
+            Select filters and export tracker or aggregate data from DHIS2
           </Typography.Text>
         </div>
       </div>
