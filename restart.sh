@@ -3,6 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+docker compose down --remove-orphans
 docker compose up --build -d
 
 for attempt in $(seq 1 30); do
