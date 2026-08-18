@@ -13,12 +13,14 @@ const COOKIE_NAME = 'dm_sid';
 const SESSION_TTL_HOURS = parseInt(process.env.SESSION_TTL_HOURS || '8', 10);
 const isProduction = process.env.NODE_ENV === 'production';
 const hasCookieSecret = !!(process.env.COOKIE_SECRET || '');
+const secureCookies = process.env.COOKIE_SECURE === 'true'
+  || (process.env.COOKIE_SECURE !== 'false' && isProduction);
 
 function cookieOptions() {
   return {
     httpOnly: true,
-    secure: isProduction,
-    sameSite: isProduction ? 'None' : 'Lax',
+    secure: secureCookies,
+    sameSite: secureCookies ? 'None' : 'Lax',
     maxAge: SESSION_TTL_HOURS * 60 * 60 * 1000,
     path: '/',
   };
@@ -29,11 +31,10 @@ function cookieOptions() {
  * Uses a signed cookie when COOKIE_SECRET is present.
  */
 function setSessionCookie(res, token) {
-  if (hasCookieSecret) {
-    res.cookie(COOKIE_NAME, token, cookieOptions());
-  } else {
-    res.cookie(COOKIE_NAME, token, cookieOptions());
-  }
+  res.cookie(COOKIE_NAME, token, {
+    ...cookieOptions(),
+    ...(hasCookieSecret ? { signed: true } : {}),
+  });
 }
 
 /**
@@ -53,8 +54,8 @@ function getSessionCookie(req) {
 function clearSessionCookie(res) {
   res.clearCookie(COOKIE_NAME, {
     httpOnly: true,
-    secure: isProduction,
-    sameSite: isProduction ? 'None' : 'Lax',
+    secure: secureCookies,
+    sameSite: secureCookies ? 'None' : 'Lax',
     path: '/',
   });
 }

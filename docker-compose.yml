@@ -8,6 +8,10 @@ services:
     environment:
       - PORT=4000
       - NODE_ENV=production
+      # The client is reached through forwarded Codespaces/local origins.
+      - CORS_ALLOW_ALL=true
+      # Local testing uses http://localhost:3000, so the session cookie cannot be Secure.
+      - COOKIE_SECURE=false
       # Required for DHIS2 App Management auto-connect (issue #3).
       # Generate a Personal Access Token in DHIS2 → User Settings → PAT
       # and set it here. The backend uses it to call /api/me on behalf of the app.
@@ -17,7 +21,7 @@ services:
       - COOKIE_SECRET=${COOKIE_SECRET}
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:4000/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
