@@ -1,6 +1,6 @@
 {
-  "name": "DHIS2 Data Manager",
-  "short_name": "DataManager",
+  "name": "DataBridge for DHIS2",
+  "short_name": "DataBridge",
   "description": "Export and import DHIS2 tracker/event data with mapping, validation, and job history.",
   "version": "1.0.0",
   "launch_path": "index.html",
