@@ -17,9 +17,6 @@ const HOST = process.env.HOST || '0.0.0.0';
 const isProduction = process.env.NODE_ENV === 'production';
 const allowAllOrigins = process.env.CORS_ALLOW_ALL === 'true' || !isProduction;
 
-// The client nginx container is the single reverse proxy in front of the API.
-app.set('trust proxy', 1);
-
 const defaultOrigins = [
   'http://localhost:3000',
   'http://127.0.0.1:3000',
