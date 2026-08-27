@@ -7,6 +7,7 @@ const ConnectionContext = createContext(null)
 // Non-sensitive display info stored in sessionStorage for fast re-hydration.
 // The actual session token lives only in the HttpOnly cookie (invisible to JS).
 const CONNECTION_CACHE_KEY = 'dhis2_connection_info'
+const SESSION_TOKEN_KEY = 'dhis2_session_token'
 
 /**
  * Returns the DHIS2 runtime base URL when running inside DHIS2 App Management.
@@ -41,6 +42,26 @@ function saveCachedConnection(profile) {
   }
 }
 
+function loadSessionToken() {
+  try {
+    return sessionStorage.getItem(SESSION_TOKEN_KEY) || null
+  } catch {
+    return null
+  }
+}
+
+function saveSessionToken(token) {
+  try {
+    if (token) {
+      sessionStorage.setItem(SESSION_TOKEN_KEY, token)
+    } else {
+      sessionStorage.removeItem(SESSION_TOKEN_KEY)
+    }
+  } catch {
+    // sessionStorage unavailable (private browsing edge cases)
+  }
+}
+
 function getApiErrorText(err, fallback = 'Connection failed') {
   const payload = err?.response?.data
   const apiError = payload?.error && typeof payload.error === 'object' ? payload.error : null
@@ -54,6 +75,7 @@ function getApiErrorText(err, fallback = 'Connection failed') {
 export function ConnectionProvider({ children }) {
   const [profiles, setProfiles] = useState([])
   const [connection, setConnection] = useState(() => loadCachedConnection())
+  const [sessionToken, setSessionToken] = useState(() => loadSessionToken())
   const [connecting, setConnecting] = useState(false)
   const [connectionError, setConnectionError] = useState(null)
   // True while the initial session-restore or bootstrap call is in-flight.
@@ -75,9 +97,15 @@ export function ConnectionProvider({ children }) {
     setConnectionError(null)
     setRestoringSession(false)
     saveCachedConnection(null)
+    setSessionToken(null)
+    saveSessionToken(null)
   }, [])
 
   const applySessionResponse = useCallback((payload) => {
+    if (payload?.sessionToken) {
+      setSessionToken(payload.sessionToken)
+      saveSessionToken(payload.sessionToken)
+    }
     const allProfiles = payload?.profiles || []
     const activeId = payload?.activeProfileId
     const activeProfile = payload?.activeProfile || allProfiles.find((p) => p.id === activeId) || null
@@ -147,11 +175,12 @@ export function ConnectionProvider({ children }) {
     clearSession()
   }, [clearSession])
 
-  /**
-   * getHeaders() — kept for API compatibility; cookies are sent automatically
-   * via withCredentials so no Authorization header is needed.
-   */
-  const getHeaders = useCallback(() => ({}), [])
+  // Keep a bearer fallback for forwarded HTTPS environments where the session
+  // cookie can be blocked even though the initial connection succeeds.
+  const getHeaders = useCallback(
+    () => (sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+    [sessionToken],
+  )
 
   /**
    * bootstrap() — used when the app is running inside DHIS2.

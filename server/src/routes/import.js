@@ -2736,7 +2736,10 @@ router.post('/tracker', importLimiter, validateImportRequest, upload.single('fil
       rows = csvToJson(req.file.buffer);
       rows = applySelectedModelDefaultsToRows(rows, dataType, selectedModel);
       if (dataType !== AGGREGATE_DATA_TYPE) {
-        rows = applyDeterministicUids(rows, dataType);
+        const shouldApplyDeterministicUids = String(options.importStrategy || 'CREATE_AND_UPDATE').toUpperCase() !== 'UPDATE';
+        if (shouldApplyDeterministicUids) {
+          rows = applyDeterministicUids(rows, dataType);
+        }
       }
       rows = await resolveOrgUnitNamesToIds(req, rows);
       payload = buildTrackerPayload(rows, mapping, dataType);
@@ -2779,7 +2782,10 @@ router.post('/tracker', importLimiter, validateImportRequest, upload.single('fil
       fileUidFieldMapping = parsed.uidFieldMapping || {};
       if (dataType !== AGGREGATE_DATA_TYPE) {
         rows = injectUidsFromMapping(rows, fileUidMapping, dataType);
-        rows = applyDeterministicUids(rows, dataType);
+        const shouldApplyDeterministicUids = String(options.importStrategy || 'CREATE_AND_UPDATE').toUpperCase() !== 'UPDATE';
+        if (shouldApplyDeterministicUids) {
+          rows = applyDeterministicUids(rows, dataType);
+        }
       }
       rows = await resolveOrgUnitNamesToIds(req, rows);
       payload = buildTrackerPayload(rows, mapping, dataType);
@@ -2813,12 +2819,15 @@ router.post('/tracker', importLimiter, validateImportRequest, upload.single('fil
     }
 
     const selection = collectSelectionFromPayload(payload, dataType);
-    const missingAggregateDataValueIssues = buildMissingAggregateDataValueIssues({ payload });
-    if (missingAggregateDataValueIssues.length > 0) {
-      return res.status(422).json({
-        error: 'Aggregate data entry is empty',
-        rowIssues: toRowIssuePayload(missingAggregateDataValueIssues),
-      });
+    let missingAggregateDataValueIssues = [];
+    if (dataType === AGGREGATE_DATA_TYPE) {
+      missingAggregateDataValueIssues = buildMissingAggregateDataValueIssues({ payload });
+      if (missingAggregateDataValueIssues.length > 0) {
+        return res.status(422).json({
+          error: 'Aggregate data entry is empty',
+          rowIssues: toRowIssuePayload(missingAggregateDataValueIssues),
+        });
+      }
     }
     const orgUnitSelectionIssues = buildOrgUnitSelectionIssues({ payload, dataType });
     if (orgUnitSelectionIssues.length > 0) {
@@ -3079,25 +3088,7 @@ router.post('/tracker', importLimiter, validateImportRequest, upload.single('fil
 
           const postImportViolations = scopeValidationResults.flatMap((r) => r.validation?.violations || []);
 
-          if (postImportViolationCount > 0) {
-            // Block completion: violations found after import
-            addHistoryEntry(sessionId, {
-              type: 'completion',
-              status: 'blocked',
-              mode: 'sync',
-              dataType,
-              details: `Dataset completion blocked: ${postImportViolationCount} post-import validation violation(s)`,
-              metadata: { action: 'complete', scopes: aggregateScopes, violationCount: postImportViolationCount },
-            });
-
-            completion = {
-              status: 'blocked',
-              reason: 'validation-violations',
-              violationCount: postImportViolationCount,
-              validationViolations: postImportViolations,
-              scopes: aggregateScopes,
-            };
-          } else if (postImportValidationUnavailable && !allowWhenUnavailable) {
+          if (postImportValidationUnavailable && !allowWhenUnavailable) {
             // Block completion: validation endpoint unavailable
             addHistoryEntry(sessionId, {
               type: 'completion',
@@ -3164,6 +3155,8 @@ router.post('/tracker', importLimiter, validateImportRequest, upload.single('fil
                 summary,
                 completed,
                 alreadyCompleted,
+                validationViolations: postImportViolations,
+                violationCount: postImportViolationCount,
               };
             } else {
               completion = {
@@ -3171,6 +3164,8 @@ router.post('/tracker', importLimiter, validateImportRequest, upload.single('fil
                 completionDate,
                 summary,
                 alreadyCompleted,
+                validationViolations: postImportViolations,
+                violationCount: postImportViolationCount,
               };
             }
 
@@ -3318,7 +3313,10 @@ router.post('/validate', importLimiter, validateImportRequest, upload.single('fi
       rows = csvToJson(req.file.buffer);
       rows = applySelectedModelDefaultsToRows(rows, dataType, selectedModel);
       if (dataType !== AGGREGATE_DATA_TYPE) {
-        rows = applyDeterministicUids(rows, dataType);
+        const shouldApplyDeterministicUids = String(importStrategy || 'CREATE_AND_UPDATE').toUpperCase() !== 'UPDATE';
+        if (shouldApplyDeterministicUids) {
+          rows = applyDeterministicUids(rows, dataType);
+        }
       }
       rows = await resolveOrgUnitNamesToIds(req, rows);
       payload = buildTrackerPayload(rows, mapping, dataType);
@@ -3360,7 +3358,10 @@ router.post('/validate', importLimiter, validateImportRequest, upload.single('fi
       fileUidMapping = parsed.uidMapping || {};
       if (dataType !== AGGREGATE_DATA_TYPE) {
         rows = injectUidsFromMapping(rows, fileUidMapping, dataType);
-        rows = applyDeterministicUids(rows, dataType);
+        const shouldApplyDeterministicUids = String(importStrategy || 'CREATE_AND_UPDATE').toUpperCase() !== 'UPDATE';
+        if (shouldApplyDeterministicUids) {
+          rows = applyDeterministicUids(rows, dataType);
+        }
       }
       rows = await resolveOrgUnitNamesToIds(req, rows);
       payload = buildTrackerPayload(rows, mapping, dataType);
@@ -3394,12 +3395,15 @@ router.post('/validate', importLimiter, validateImportRequest, upload.single('fi
     }
 
     const selection = collectSelectionFromPayload(payload, dataType);
-    const missingAggregateDataValueIssues = buildMissingAggregateDataValueIssues({ payload });
-    if (missingAggregateDataValueIssues.length > 0) {
-      return res.status(422).json({
-        error: 'Aggregate data entry is empty',
-        rowIssues: toRowIssuePayload(missingAggregateDataValueIssues),
-      });
+    let missingAggregateDataValueIssues = [];
+    if (dataType === AGGREGATE_DATA_TYPE) {
+      missingAggregateDataValueIssues = buildMissingAggregateDataValueIssues({ payload });
+      if (missingAggregateDataValueIssues.length > 0) {
+        return res.status(422).json({
+          error: 'Aggregate data entry is empty',
+          rowIssues: toRowIssuePayload(missingAggregateDataValueIssues),
+        });
+      }
     }
     const orgUnitSelectionIssues = buildOrgUnitSelectionIssues({ payload, dataType });
     if (orgUnitSelectionIssues.length > 0) {

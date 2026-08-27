@@ -40,6 +40,16 @@ test('normalizeDhis2BaseUrl rejects credentialed URLs', () => {
   });
 });
 
+test('mapError preserves the real server message in production', () => {
+  const { mapError } = require('../src/utils/apiError');
+  const err = { message: 'Database unavailable', code: 'DB_DOWN' };
+  const normalized = mapError(err, { isProd: true });
+
+  assert.equal(normalized.status, 500);
+  assert.equal(normalized.code, 'INTERNAL_ERROR');
+  assert.equal(normalized.message, 'Database unavailable');
+});
+
 test('buildTrackerPayload ignores prototype pollution keys', () => {
   const row = { event: 'abc', program: 'prog', programStage: 'stage', orgUnit: 'org' };
   const payload = buildTrackerPayload([row], { __proto__: 'x', constructor: 'y' }, 'events');
@@ -170,6 +180,47 @@ test('connection endpoint auto-corrects DHIS2 URLs ending with /api', async () =
   assert.equal(res.body.activeProfile?.url, `http://127.0.0.1:${port}`);
 
   server.close();
+});
+
+test('connection endpoint reports login redirects as auth failures', async () => {
+  const server = http.createServer((req, res) => {
+    if (req.method === 'GET' && req.url?.startsWith('/api/me')) {
+      res.writeHead(302, { Location: '/login/' });
+      res.end('<html><body>login</body></html>');
+      return;
+    }
+    if (req.method === 'GET' && req.url?.startsWith('/api/system/info')) {
+      res.writeHead(302, { Location: '/login/' });
+      res.end('<html><body>login</body></html>');
+      return;
+    }
+    res.writeHead(404).end();
+  });
+
+  await new Promise((resolve) => server.listen(0, resolve));
+  const { port } = server.address();
+
+  const res = await request(app)
+    .post('/api/connect')
+    .send({
+      url: `http://127.0.0.1:${port}`,
+      username: 'user',
+      password: 'pass',
+    });
+
+  assert.equal(res.status, 401);
+  assert.match(res.body.error.message, /login|auth/i);
+  server.close();
+});
+
+test('browser origin from GitHub forwarded app domain is allowed by CORS', async () => {
+  const res = await request(app)
+    .post('/api/connect')
+    .set('Origin', 'https://probable-umbrella-x5445vpv5pjxfpqqq-3000.app.github.dev')
+    .send({ url: 'https://play.im.dhis2.org/dev', username: 'admin', password: 'district' });
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.success, true);
 });
 
 test('import endpoint rejects invalid mapping JSON before processing file', async () => {

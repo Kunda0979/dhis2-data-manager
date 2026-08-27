@@ -115,6 +115,21 @@ function extractFirstImportConflictMessage(data = {}) {
   return candidates.find(Boolean) || '';
 }
 
+function getErrorMessage(err) {
+  if (!err) return 'Unexpected server error';
+  if (typeof err === 'string') return err || 'Unexpected server error';
+  if (err instanceof Error) return err.message || 'Unexpected server error';
+  if (typeof err.message === 'string' && err.message.trim()) return err.message;
+  if (typeof err.error === 'string' && err.error.trim()) return err.error;
+  if (err?.response?.data && typeof err.response.data === 'string' && err.response.data.trim()) {
+    return err.response.data;
+  }
+  if (err?.response?.data && typeof err?.response?.data?.message === 'string' && err.response.data.message.trim()) {
+    return err.response.data.message;
+  }
+  return 'Unexpected server error';
+}
+
 function mapError(err, { isProd = true } = {}) {
   const networkError = err?.isAxiosError && !err?.response;
   if (networkError) {
@@ -169,10 +184,11 @@ function mapError(err, { isProd = true } = {}) {
     });
   }
 
+  const fallbackMessage = getErrorMessage(err);
   return buildApiError({
     status: 500,
     code: 'INTERNAL_ERROR',
-    message: isProd ? 'Unexpected server error' : (err?.message || 'Unexpected server error'),
+    message: fallbackMessage,
     hint: 'Retry the request. If it keeps failing, contact support.',
     details: isProd ? undefined : { message: err?.message, stack: err?.stack },
   });

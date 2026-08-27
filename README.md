@@ -137,13 +137,26 @@ npm test
 ## Docker
 
 ```bash
-docker compose up --build
+npm run app:start
 ```
 
 Default compose behavior:
 - Frontend is exposed on `http://localhost:3000`.
 - Backend runs on internal Docker network (not published to host by default).
 - Set `DHIS2_API_TOKEN` and `COOKIE_SECRET` in your shell or `.env` before startup if needed.
+
+Use the same commands after a Codespaces restart:
+
+```bash
+npm run app:restart
+npm run app:status
+```
+
+`app:restart` rebuilds and recreates both containers, waits for the backend health
+check before starting the client, and prevents stale frontend or backend images
+from being served. The app session is intentionally held in memory for security;
+after the backend container itself is recreated, reconnect once with your DHIS2
+credentials.
 
 ## Configuration
 

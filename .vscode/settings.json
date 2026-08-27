@@ -5,5 +5,11 @@
       "label": "DataBridge for DHIS2",
       "onAutoForward": "notify"
     }
+  },
+  "chat.tools.terminal.autoApprove": {
+    "/^cd /workspaces/dhis2-data-manager/server && node --test --test-reporter=spec$/": {
+      "approve": true,
+      "matchCommandLine": true
+    }
   }
 }

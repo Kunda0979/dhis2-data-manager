@@ -1,5 +1,6 @@
 const express = require('express');
 const { normalizeDhis2BaseUrl } = require('../utils/security');
+const { createAppError } = require('../utils/apiError');
 const { validateConnectionPayload } = require('../middleware/validate');
 const { connectLimiter } = require('../middleware/rateLimiter');
 const { extractBearerToken } = require('../middleware/auth');
@@ -68,6 +69,17 @@ async function probeDhis2Connection({ baseUrl, headers }) {
   };
 }
 
+function isDhis2LoginRedirect(err) {
+  const status = err?.response?.status;
+  const location = String(err?.response?.headers?.location || '').toLowerCase();
+  const data = typeof err?.response?.data === 'string' ? err.response.data : '';
+  const lowerData = data.toLowerCase();
+
+  const isRedirect = status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
+  const loginRedirect = location.includes('/login') || location.includes('login/') || lowerData.includes('dhis2-base-url') || lowerData.includes('login');
+  return isRedirect && loginRedirect;
+}
+
 async function resolveWorkingDhis2BaseUrl({ baseUrl, headers }) {
   const candidates = buildBaseUrlCandidates(baseUrl);
   let lastError = null;
@@ -81,6 +93,14 @@ async function resolveWorkingDhis2BaseUrl({ baseUrl, headers }) {
       };
     } catch (err) {
       lastError = err;
+      if (isDhis2LoginRedirect(err)) {
+        throw createAppError({
+          status: 401,
+          code: 'DHIS2_AUTH_REQUIRED',
+          message: 'DHIS2 is redirecting to the login page. Check the URL and credentials.',
+          hint: 'Open the DHIS2 instance in a browser to verify the base URL and confirm the account is still active.',
+        });
+      }
       // 404 usually means an invalid base URL path (for example ending with /api).
       if (err?.response?.status === 404) continue;
       throw err;
