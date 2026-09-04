@@ -1,0 +1,10 @@
+{
+  "name": "DHIS2 Data Manager",
+  "forwardPorts": [3000],
+  "portsAttributes": {
+    "3000": {
+      "label": "DHIS2 Data Manager",
+      "visibility": "public"
+    }
+  }
+}

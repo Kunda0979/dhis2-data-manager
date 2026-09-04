@@ -23,7 +23,7 @@ function validateConnectionPayload(req, res, next) {
 function validateImportRequest(req, res, next) {
   const allowedStrategies = new Set(['CREATE', 'UPDATE', 'DELETE', 'CREATE_AND_UPDATE']);
   const allowedAtomicModes = new Set(['ALL', 'NONE', 'OBJECT']);
-  const allowedDataTypes = new Set(['events', 'enrollments', 'trackedEntities']);
+  const allowedDataTypes = new Set(['events', 'enrollments', 'trackedEntities', 'aggregate']);
 
   if (req.body.importStrategy && !allowedStrategies.has(req.body.importStrategy)) {
     return res.status(400).json({ error: 'Invalid importStrategy value' });

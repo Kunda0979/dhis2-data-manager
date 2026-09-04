@@ -1,8 +1,14 @@
 /**
  * Middleware to validate that DHIS2 connection headers are present.
+ *
+ * Authentication priority order:
+ *  1. HttpOnly signed cookie `dm_sid` (primary, used in production / DHIS2 app context)
+ *  2. Bearer token in Authorization header (fallback for dev/testing)
+ *  3. Explicit x-dhis2-* headers (legacy / direct API testing)
  */
 const { normalizeDhis2BaseUrl } = require('../utils/security');
 const { getSessionByToken, getActiveCredentials } = require('../services/sessionService');
+const { getSessionCookie } = require('../utils/sessionCookie');
 
 function extractBearerToken(req) {
   const auth = req.headers.authorization;
@@ -12,10 +18,19 @@ function extractBearerToken(req) {
   return token;
 }
 
+function resolveSessionToken(req) {
+  // 1. Cookie (preferred, HttpOnly)
+  const cookieToken = getSessionCookie(req);
+  if (cookieToken) return cookieToken;
+  // 2. Bearer header (dev / testing fallback)
+  return extractBearerToken(req);
+}
+
 function requireDhis2Credentials(req, res, next) {
-  const bearerToken = extractBearerToken(req);
-  if (bearerToken) {
-    const session = getSessionByToken(bearerToken);
+  const sessionToken = resolveSessionToken(req);
+
+  if (sessionToken) {
+    const session = getSessionByToken(sessionToken);
     if (!session) {
       return res.status(401).json({
         error: 'Invalid session',
@@ -31,7 +46,7 @@ function requireDhis2Credentials(req, res, next) {
       });
     }
 
-    req.authToken = bearerToken;
+    req.authToken = sessionToken;
     req.authSession = session;
     req.dhis2Credentials = credentials;
     return next();

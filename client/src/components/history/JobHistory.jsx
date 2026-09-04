@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Table, Tag, Button, Empty, Typography, Space, Popconfirm, App, Input, Select } from 'antd'
+import { Table, Tag, Button, Empty, Typography, Space, Popconfirm, App, Input, Select, Alert, Card, Statistic, Row, Col } from 'antd'
 import { DeleteOutlined, ReloadOutlined, RedoOutlined } from '@ant-design/icons'
 import StatusBadge from '../common/StatusBadge.jsx'
 import { useConnection } from '../../contexts/ConnectionContext.jsx'
@@ -11,6 +11,7 @@ export default function JobHistory() {
   const { message } = App.useApp()
   const { getHeaders } = useConnection()
   const [history, setHistory] = useState([])
+  const [retention, setRetention] = useState(null)
   const [filters, setFilters] = useState({ type: '', status: '', q: '' })
   const [loading, setLoading] = useState(false)
 
@@ -33,19 +34,33 @@ export default function JobHistory() {
     }
   }
 
+  const loadRetention = async () => {
+    try {
+      const res = await api.get('/api/history/retention-status', {
+        headers: getHeaders(),
+      })
+      setRetention(res.data)
+    } catch {
+      setRetention(null)
+    }
+  }
+
   useEffect(() => {
     loadHistory()
+    loadRetention()
   }, [filters.type, filters.status, filters.q])
 
   const handleClear = async () => {
     await api.delete('/api/history', { headers: getHeaders() })
     await loadHistory()
+    await loadRetention()
     message.success('History cleared')
   }
 
   const handleDelete = async (id) => {
     await api.delete(`/api/history/${id}`, { headers: getHeaders() })
     await loadHistory()
+    await loadRetention()
   }
 
   const handleRerun = async (id) => {
@@ -53,6 +68,7 @@ export default function JobHistory() {
       const res = await api.post(`/api/history/${id}/rerun`, {}, { headers: getHeaders() })
       message.success(`Rerun job created: ${res.data.jobId}`)
       await loadHistory()
+      await loadRetention()
     } catch (err) {
       message.error(err.response?.data?.error || 'Unable to rerun this item')
     }
@@ -71,7 +87,10 @@ export default function JobHistory() {
       dataIndex: 'type',
       key: 'type',
       width: 100,
-      render: (v) => <Tag color={v === 'export' ? 'blue' : 'purple'}>{String(v || '').toUpperCase()}</Tag>,
+      render: (v) => {
+        const color = v === 'export' ? 'blue' : v === 'import' ? 'purple' : v === 'validation-run' ? 'gold' : 'cyan'
+        return <Tag color={color}>{String(v || '').toUpperCase()}</Tag>
+      },
     },
     {
       title: 'Mode',
@@ -150,6 +169,8 @@ export default function JobHistory() {
               { value: '', label: 'All types' },
               { value: 'export', label: 'Export' },
               { value: 'import', label: 'Import' },
+              { value: 'validation-run', label: 'Validation run' },
+              { value: 'completion', label: 'Completion' },
             ]}
             onChange={(value) => setFilters((f) => ({ ...f, type: value }))}
           />
@@ -164,6 +185,9 @@ export default function JobHistory() {
               { value: 'running', label: 'Running' },
               { value: 'failed', label: 'Failed' },
               { value: 'cancelled', label: 'Cancelled' },
+              { value: 'blocked', label: 'Blocked' },
+              { value: 'expired', label: 'Expired' },
+              { value: 'expired-output', label: 'Expired output' },
             ]}
             onChange={(value) => setFilters((f) => ({ ...f, status: value }))}
           />
@@ -174,7 +198,10 @@ export default function JobHistory() {
             style={{ width: 180 }}
             onSearch={(q) => setFilters((f) => ({ ...f, q }))}
           />
-          <Button icon={<ReloadOutlined />} size="small" onClick={loadHistory} loading={loading}>
+          <Button icon={<ReloadOutlined />} size="small" onClick={async () => {
+            await loadHistory()
+            await loadRetention()
+          }} loading={loading}>
             Refresh
           </Button>
           <Popconfirm title="Clear all history?" onConfirm={handleClear}>
@@ -182,6 +209,38 @@ export default function JobHistory() {
           </Popconfirm>
         </Space>
       </div>
+
+      {retention && (
+        <>
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message="Retention policy"
+            description={`Export output TTL: ${retention.export?.outputRetentionMinutes || 0} min. Import status TTL: ${retention.import?.statusRetentionHours || 0} hr. History TTL: ${retention.history?.retentionHours || 0} hr (${retention.history?.retentionHours ? 'enabled' : 'disabled'}).`}
+          />
+          <Row gutter={12} style={{ marginBottom: 16 }}>
+            <Col xs={24} md={8}>
+              <Card size="small">
+                <Statistic title="Export Outputs" value={retention.export?.availableOutputs || 0} suffix={`/ ${retention.export?.totalTrackedJobs || 0} jobs`} />
+                <Text type="secondary" style={{ fontSize: 12 }}>Expired outputs: {retention.export?.expiredOutputs || 0}</Text>
+              </Card>
+            </Col>
+            <Col xs={24} md={8}>
+              <Card size="small">
+                <Statistic title="Import Jobs" value={retention.import?.activeJobs || 0} suffix="active" />
+                <Text type="secondary" style={{ fontSize: 12 }}>Expired tracked jobs: {retention.import?.expiredJobs || 0}</Text>
+              </Card>
+            </Col>
+            <Col xs={24} md={8}>
+              <Card size="small">
+                <Statistic title="History Entries" value={retention.history?.totalEntries || 0} suffix={`/ ${retention.history?.maxItems || 0}`} />
+                <Text type="secondary" style={{ fontSize: 12 }}>Expired-state entries: {retention.history?.expiredEntries || 0}</Text>
+              </Card>
+            </Col>
+          </Row>
+        </>
+      )}
 
       {history.length === 0 ? (
         <Empty

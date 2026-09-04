@@ -17,6 +17,7 @@ function sanitizeProfile(profile) {
     profileName: profile.profileName,
     url: profile.url,
     username: profile.username,
+    // authToken is never serialized to the client for security
     user: profile.user,
     serverInfo: profile.serverInfo,
     createdAt: profile.createdAt,
@@ -68,12 +69,13 @@ function getOrCreateSession(token) {
   return createSession();
 }
 
-function upsertProfile(session, { url, username, password, user, serverInfo, profileName }) {
+function upsertProfile(session, { url, username, password, authToken, user, serverInfo, profileName }) {
   const existing = session.profiles.find((profile) => profile.url === url && profile.username === username);
   const timestamp = new Date().toISOString();
 
   if (existing) {
-    existing.password = password;
+    if (password !== undefined) existing.password = password;
+    if (authToken !== undefined) existing.authToken = authToken;
     existing.user = user;
     existing.serverInfo = serverInfo;
     existing.profileName = profileName || existing.profileName || user?.displayName || username;
@@ -87,8 +89,9 @@ function upsertProfile(session, { url, username, password, user, serverInfo, pro
     id: crypto.randomUUID(),
     profileName: profileName || user?.displayName || username,
     url,
-    username,
-    password,
+    username: username || 'dhis2-app',
+    password: password || null,
+    authToken: authToken || null,
     user,
     serverInfo,
     createdAt: timestamp,
@@ -113,6 +116,7 @@ function getActiveCredentials(session) {
     url: profile.url,
     username: profile.username,
     password: profile.password,
+    authToken: profile.authToken || null,
     profileId: profile.id,
   };
 }

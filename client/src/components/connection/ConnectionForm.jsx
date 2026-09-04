@@ -20,20 +20,44 @@ export default function ConnectionForm() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
+    <div
+      className="min-h-screen flex items-center justify-center p-4"
+      style={{ background: 'linear-gradient(135deg, #0f172a 0%, #0c2340 45%, #0369a1 100%)' }}
+    >
       <Card
-        style={{ width: '100%', maxWidth: 460 }}
-        bordered={false}
-        className="shadow-xl"
+        variant="borderless"
+        style={{
+          width: '100%',
+          maxWidth: 460,
+          boxShadow: '0 24px 64px rgba(0,0,0,0.35)',
+          borderRadius: 16,
+        }}
       >
         <div className="text-center mb-6">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-blue-50 mb-4">
-            <ApiOutlined style={{ fontSize: 32, color: '#1677ff' }} />
+          <div
+            style={{
+              width: 60,
+              height: 60,
+              borderRadius: 16,
+              background: 'linear-gradient(135deg, #0369a1 0%, #0ea5e9 100%)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: 14,
+              boxShadow: '0 4px 16px rgba(3,105,161,0.4)',
+            }}
+          >
+            <ApiOutlined style={{ fontSize: 28, color: '#fff' }} />
           </div>
-          <Title level={3} style={{ marginBottom: 4 }}>
-            DHIS2 Data Manager
+          <Title level={3} style={{ marginBottom: 0, letterSpacing: '-0.3px' }}>
+            DataBridge
           </Title>
-          <Text type="secondary">Connect to your DHIS2 instance to get started</Text>
+          <Text style={{ fontSize: 12, color: '#0369a1', fontWeight: 600, letterSpacing: '0.8px', textTransform: 'uppercase', display: 'block', marginBottom: 6 }}>
+            for DHIS2
+          </Text>
+          <Text type="secondary" style={{ fontSize: 13 }}>
+            Connect to your DHIS2 instance to get started
+          </Text>
         </div>
 
         {connectionError && (
@@ -122,7 +146,7 @@ export default function ConnectionForm() {
         <Paragraph type="secondary" style={{ fontSize: 12, textAlign: 'center', marginBottom: 0 }}>
           Credentials are stored server-side in an expiring in-memory session.
           <br />
-          Supports DHIS2 v42+ with the new Tracker API.
+          Supports DHIS2 v42+ tracker and aggregate data APIs.
         </Paragraph>
       </Card>
     </div>

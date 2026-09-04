@@ -4,8 +4,9 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "printf 'Testing links:\nhttp://localhost:3000\nhttp://localhost:4000\nhttp://localhost:4000/health\n\n' && vite",
     "build": "vite build",
+    "build:zip": "vite build && cd dist && zip -r ../dhis2-data-manager.zip .",
     "preview": "vite preview"
   },
   "dependencies": {

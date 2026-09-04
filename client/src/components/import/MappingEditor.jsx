@@ -8,6 +8,7 @@ const DHIS2_FIELDS = {
   events: ['event', 'status', 'program', 'programStage', 'orgUnit', 'occurredAt', 'scheduledAt', 'enrollment', 'trackedEntity'],
   enrollments: ['enrollment', 'trackedEntity', 'program', 'orgUnit', 'enrolledAt', 'occurredAt', 'status'],
   trackedEntities: ['trackedEntity', 'trackedEntityType', 'orgUnit'],
+  aggregate: ['dataElement', 'period', 'orgUnit', 'categoryOptionCombo', 'attributeOptionCombo', 'value', 'comment', 'storedBy'],
 }
 
 function normalize(value) {

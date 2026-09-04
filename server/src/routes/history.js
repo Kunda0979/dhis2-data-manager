@@ -6,12 +6,24 @@ const {
   deleteHistoryEntry,
   clearHistory,
   addHistoryEntry,
+  getHistoryRetentionStatus,
 } = require('../services/historyService');
 const { createExportJob } = require('../services/exportJobService');
+const { getExportRetentionStatus } = require('../services/exportJobService');
+const { getImportRetentionStatus } = require('../services/importService');
 
 const router = express.Router();
 
 router.use(requireDhis2Credentials);
+
+router.get('/retention-status', (req, res) => {
+  const sessionId = req.authSession?.id || 'anonymous';
+  res.json({
+    export: getExportRetentionStatus(),
+    import: getImportRetentionStatus(),
+    history: getHistoryRetentionStatus(sessionId),
+  });
+});
 
 router.get('/', (req, res) => {
   const sessionId = req.authSession?.id || 'anonymous';
@@ -38,7 +50,7 @@ router.delete('/', (req, res) => {
   res.json({ success: true });
 });
 
-router.post('/:id/rerun', (req, res) => {
+router.post('/:id/rerun', (req, res, next) => {
   const sessionId = req.authSession?.id || 'anonymous';
   const entry = getHistoryEntry(sessionId, req.params.id);
   if (!entry) {
@@ -49,26 +61,30 @@ router.post('/:id/rerun', (req, res) => {
     return res.status(400).json({ error: 'Rerun is currently supported only for export jobs' });
   }
 
-  const params = entry.metadata?.params || {};
-  const job = createExportJob({
-    sessionId,
-    credentials: req.dhis2Credentials,
-    dataType: entry.dataType || 'events',
-    format: entry.format || 'json',
-    params,
-  });
+  try {
+    const params = entry.metadata?.params || {};
+    const job = createExportJob({
+      sessionId,
+      credentials: req.dhis2Credentials,
+      dataType: entry.dataType || 'events',
+      format: entry.format || 'json',
+      params,
+    });
 
-  addHistoryEntry(sessionId, {
-    type: 'export',
-    status: 'queued',
-    mode: 'async',
-    dataType: entry.dataType || 'events',
-    format: entry.format || 'json',
-    details: `Rerun created from history item ${entry.id}`,
-    metadata: { jobId: job.id, params, rerunOf: entry.id },
-  });
+    addHistoryEntry(sessionId, {
+      type: 'export',
+      status: 'queued',
+      mode: 'async',
+      dataType: entry.dataType || 'events',
+      format: entry.format || 'json',
+      details: `Rerun created from history item ${entry.id}`,
+      metadata: { jobId: job.id, params: job.params, scope: job.scope, rerunOf: entry.id },
+    });
 
-  res.status(202).json({ success: true, jobId: job.id, status: job.status });
+    res.status(202).json({ success: true, jobId: job.id, status: job.status });
+  } catch (err) {
+    next(err);
+  }
 });
 
 module.exports = router;

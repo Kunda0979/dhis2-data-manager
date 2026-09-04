@@ -14,11 +14,19 @@ const STATUS_COLORS = {
   cancelled: 'default',
   pending: 'warning',
   warning: 'warning',
+  blocked: 'magenta',
+  expired: 'gold',
+  EXPIRED: 'gold',
+  'expired-output': 'orange',
   ACTIVE: 'blue',
   active: 'blue',
 }
 
+const STATUS_LABELS = {
+  'expired-output': 'EXPIRED OUTPUT',
+}
+
 export default function StatusBadge({ status, label }) {
   const color = STATUS_COLORS[status] || 'default'
-  return <Tag color={color}>{label || status}</Tag>
+  return <Tag color={color}>{label || STATUS_LABELS[status] || status}</Tag>
 }

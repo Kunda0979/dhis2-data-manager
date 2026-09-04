@@ -5,12 +5,14 @@ const DATA_TYPES = [
   { value: 'events', label: 'Events' },
   { value: 'enrollments', label: 'Enrollments' },
   { value: 'trackedEntities', label: 'Tracked Entities' },
+  { value: 'aggregate', label: 'Aggregate Data' },
 ]
 
 const FORMATS = [
   { value: 'json', label: 'JSON' },
   { value: 'csv', label: 'CSV' },
   { value: 'xlsx', label: 'Excel (.xlsx)' },
+  { value: 'pdf', label: 'PDF' },
 ]
 
 const STATUS_OPTIONS = [
@@ -30,6 +32,8 @@ export default function ExportOptions({
   onStatusChange,
   onAsyncModeChange,
 }) {
+  const showStatusFilter = dataType !== 'aggregate'
+
   return (
     <Card size="small" title="Export Options" style={{ marginBottom: 12 }}>
       <Form layout="vertical" size="small">
@@ -53,16 +57,18 @@ export default function ExportOptions({
           />
         </Form.Item>
 
-        <Form.Item label="Status Filter" style={{ marginBottom: 0 }}>
-          <Select
-            options={STATUS_OPTIONS}
-            value={status || ''}
-            onChange={(v) => onStatusChange(v || undefined)}
-            style={{ width: 180 }}
-          />
-        </Form.Item>
+        {showStatusFilter && (
+          <Form.Item label="Status Filter" style={{ marginBottom: 0 }}>
+            <Select
+              options={STATUS_OPTIONS}
+              value={status || ''}
+              onChange={(v) => onStatusChange(v || undefined)}
+              style={{ width: 180 }}
+            />
+          </Form.Item>
+        )}
 
-        <Form.Item label="Execution Mode" style={{ marginTop: 12, marginBottom: 0 }}>
+        <Form.Item label="Execution Mode" style={{ marginTop: showStatusFilter ? 12 : 0, marginBottom: 0 }}>
           <Radio.Group
             value={asyncMode ? 'async' : 'sync'}
             onChange={(e) => onAsyncModeChange(e.target.value === 'async')}

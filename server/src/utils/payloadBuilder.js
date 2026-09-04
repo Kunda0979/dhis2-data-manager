@@ -1,16 +1,19 @@
+const crypto = require('crypto');
+
 /**
- * Build a DHIS2 tracker payload from flat row data.
- * Supports building events, enrollments, and tracked entities.
+ * Build a DHIS2 import payload from flat row data.
+ * Supports tracker payloads plus aggregate data value sets.
  *
  * @param {Array} rows - flat data rows (from CSV/Excel)
  * @param {object} mapping - column mapping { dhis2Field: columnName }
- * @param {string} dataType - 'events' | 'enrollments' | 'trackedEntities'
+ * @param {string} dataType - 'events' | 'enrollments' | 'trackedEntities' | 'aggregate'
  */
 function buildTrackerPayload(rows, mapping, dataType) {
   const payload = {
     trackedEntities: [],
     enrollments: [],
     events: [],
+    dataValues: [],
   };
 
   for (const row of rows) {
@@ -22,6 +25,8 @@ function buildTrackerPayload(rows, mapping, dataType) {
       payload.enrollments.push(buildEnrollment(mapped));
     } else if (dataType === 'trackedEntities') {
       payload.trackedEntities.push(buildTrackedEntity(mapped));
+    } else if (dataType === 'aggregate') {
+      payload.dataValues.push(...buildAggregateDataValuesFromRow(mapped));
     }
   }
 
@@ -29,14 +34,17 @@ function buildTrackerPayload(rows, mapping, dataType) {
 }
 
 /**
- * Convert a raw tracker payload (JSON import) to the correct structure.
+ * Convert a raw JSON payload to the correct DHIS2 import structure.
  */
-function convertToTracker(rawPayload) {
-  if (rawPayload.trackedEntities || rawPayload.enrollments || rawPayload.events) {
+function convertToTracker(rawPayload, dataType = 'events') {
+  if (rawPayload.trackedEntities || rawPayload.enrollments || rawPayload.events || rawPayload.dataValues) {
     return rawPayload;
   }
-  // If it's an array, assume it's events
+  // If it's an array, use the selected type to place the rows.
   if (Array.isArray(rawPayload)) {
+    if (dataType === 'aggregate') {
+      return { dataValues: rawPayload };
+    }
     return { events: rawPayload };
   }
   return rawPayload;
@@ -61,18 +69,48 @@ function isSafeObjectKey(key) {
 }
 
 const DHIS2_UID_LENGTH = 11;
+const DHIS2_UID_REGEX = /^[A-Za-z][A-Za-z0-9]{10}$/;
+
+function generateDhis2Uid() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  const firstChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+
+  let uid = firstChars[crypto.randomInt(firstChars.length)];
+  for (let i = 1; i < DHIS2_UID_LENGTH; i += 1) {
+    uid += chars[crypto.randomInt(chars.length)];
+  }
+  return uid;
+}
+
+function resolveEventId(value) {
+  const raw = String(value || '').trim();
+  if (!raw || raw.toUpperCase() === 'AUTO' || raw.toUpperCase() === 'AUTO-GENERATED') {
+    return generateDhis2Uid();
+  }
+  if (DHIS2_UID_REGEX.test(raw)) return raw;
+  return generateDhis2Uid();
+}
+
+function parseTrackedIdFromKey(key, prefix) {
+  if (typeof key !== 'string') return null;
+  if (!key.startsWith(`${prefix}_`)) return null;
+  const rest = key.slice(prefix.length + 1);
+  const rawId = rest.split('__')[0];
+  return /^[A-Za-z0-9]{11}$/.test(rawId) ? rawId : null;
+}
 
 function buildEvent(row) {
   const dataValues = [];
   for (const [key, value] of Object.entries(row)) {
-    if (key.startsWith('de_') || (key.length === DHIS2_UID_LENGTH && /^[A-Za-z0-9]+$/.test(key))) {
-      const dataElement = key.startsWith('de_') ? key.slice(3) : key;
+    const dataElementId = parseTrackedIdFromKey(key, 'de');
+    if (dataElementId || (key.length === DHIS2_UID_LENGTH && /^[A-Za-z0-9]+$/.test(key))) {
+      const dataElement = dataElementId || key;
       dataValues.push({ dataElement, value });
     }
   }
 
   return {
-    event: row.event || undefined,
+    event: resolveEventId(row.event),
     status: row.status || 'ACTIVE',
     program: row.program,
     programStage: row.programStage,
@@ -100,8 +138,10 @@ function buildEnrollment(row) {
 function buildTrackedEntity(row) {
   const attributes = [];
   for (const [key, value] of Object.entries(row)) {
-    if (key.startsWith('attr_') || key.startsWith('tea_')) {
-      const attribute = key.startsWith('attr_') ? key.slice(5) : key.slice(4);
+    const attrId = parseTrackedIdFromKey(key, 'attr');
+    const teaId = parseTrackedIdFromKey(key, 'tea');
+    if (attrId || teaId) {
+      const attribute = attrId || teaId;
       attributes.push({ attribute, value });
     }
   }
@@ -112,6 +152,68 @@ function buildTrackedEntity(row) {
     orgUnit: row.orgUnit,
     attributes,
   };
+}
+
+function buildDataValue(row) {
+  return {
+    dataElement: row.dataElement,
+    period: row.period,
+    orgUnit: row.orgUnit,
+    categoryOptionCombo: row.categoryOptionCombo || row.coc || undefined,
+    attributeOptionCombo: row.attributeOptionCombo || row.aoc || undefined,
+    value: row.value,
+    comment: row.comment || undefined,
+    storedBy: row.storedBy || undefined,
+  };
+}
+
+function parseAggregateDataElementKey(key) {
+  if (typeof key !== 'string') return null;
+  const match = key.match(/^de_([A-Za-z0-9]{11})(?:__coc_([A-Za-z0-9]{11}))?(?:__.*)?$/);
+  if (!match) return null;
+
+  return {
+    dataElement: match[1],
+    categoryOptionCombo: match[2] || null,
+  };
+}
+
+function buildAggregateDataValuesFromRow(row) {
+  if (!row || typeof row !== 'object') return [];
+
+  // Backwards-compatible long format row.
+  if (String(row.dataElement || '').trim()) {
+    const legacy = buildDataValue(row);
+    if (legacy.value === undefined || legacy.value === null || String(legacy.value).trim() === '') {
+      return [];
+    }
+    return [legacy];
+  }
+
+  const values = [];
+  const period = row.period;
+  const orgUnit = row.orgUnit;
+  const attributeOptionCombo = row.attributeOptionCombo || row.aoc || undefined;
+  const fallbackCategoryOptionCombo = row.categoryOptionCombo || row.coc || undefined;
+
+  for (const [key, rawValue] of Object.entries(row)) {
+    const parsed = parseAggregateDataElementKey(key);
+    if (!parsed) continue;
+    if (rawValue === undefined || rawValue === null || String(rawValue).trim() === '') continue;
+
+    values.push({
+      dataElement: parsed.dataElement,
+      period,
+      orgUnit,
+      categoryOptionCombo: parsed.categoryOptionCombo || fallbackCategoryOptionCombo,
+      attributeOptionCombo,
+      value: rawValue,
+      comment: row.comment || undefined,
+      storedBy: row.storedBy || undefined,
+    });
+  }
+
+  return values;
 }
 
 module.exports = { buildTrackerPayload, convertToTracker };

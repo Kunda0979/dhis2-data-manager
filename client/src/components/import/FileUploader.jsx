@@ -30,6 +30,11 @@ export default function FileUploader({ onFileSelect }) {
           or click to browse your files
         </Text>
         <div style={{ marginTop: 8 }}>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            After upload: select model, run Dry Run, then import.
+          </Text>
+        </div>
+        <div style={{ marginTop: 8 }}>
           <Space>
             <Text type="secondary" style={{ fontSize: 12 }}>Supported formats:</Text>
             <Text code style={{ fontSize: 12 }}>.json</Text>

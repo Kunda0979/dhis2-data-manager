@@ -1,0 +1,11 @@
+{
+  "name": "dhis2-data-manager",
+  "private": true,
+  "scripts": {
+    "app:start": "docker compose up --build -d",
+    "app:restart": "docker compose up --build -d --force-recreate",
+    "app:stop": "docker compose down",
+    "app:status": "docker compose ps",
+    "app:logs": "docker compose logs --tail=100 -f"
+  }
+}
